@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+env/
+
+# Secrets / local config
+.env
+*.env
+!.env.example
+
+# Bot/runtime data
+discord_bot/data/*.sqlite3
+discord_bot/data/*.db
+discord_bot/data/replays/
+discord_bot/data/reports/
+discord_bot/data/dependencies/*
+!discord_bot/data/dependencies/.gitkeep
+
+# Replay/game assets - do not commit these
+*.SC2Replay
+*.s2ma
+*.SC2Map
+*.SC2Mod
+*.zip
+
+# Strategy mining local inputs/outputs
+strategy_mining/input/*
+!strategy_mining/input/.gitkeep
+strategy_mining/output/*
+!strategy_mining/output/.gitkeep
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

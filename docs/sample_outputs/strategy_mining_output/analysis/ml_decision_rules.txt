@@ -1,0 +1,37 @@
+|--- cavalry_to_now <= 22.50
+|   |--- ranged_to_now <= 14.50
+|   |   |--- losses_to_now <= 43.50
+|   |   |   |--- ranged_to_now <= 6.50
+|   |   |   |   |--- class: 0
+|   |   |   |--- ranged_to_now >  6.50
+|   |   |   |   |--- class: 0
+|   |   |--- losses_to_now >  43.50
+|   |   |   |--- static_defense_to_now <= 32.00
+|   |   |   |   |--- class: 0
+|   |   |   |--- static_defense_to_now >  32.00
+|   |   |   |   |--- class: 0
+|   |--- ranged_to_now >  14.50
+|   |   |--- structures_done_to_now <= 27.50
+|   |   |   |--- upgrades_to_now <= 35.00
+|   |   |   |   |--- class: 0
+|   |   |   |--- upgrades_to_now >  35.00
+|   |   |   |   |--- class: 1
+|   |   |--- structures_done_to_now >  27.50
+|   |   |   |--- static_defense_to_now <= 5.50
+|   |   |   |   |--- class: 1
+|   |   |   |--- static_defense_to_now >  5.50
+|   |   |   |   |--- class: 0
+|--- cavalry_to_now >  22.50
+|   |--- walls_gates_to_now <= 19.00
+|   |   |--- static_defense_to_now <= 18.50
+|   |   |   |--- upgrades_to_now <= 31.50
+|   |   |   |   |--- class: 0
+|   |   |   |--- upgrades_to_now >  31.50
+|   |   |   |   |--- class: 1
+|   |   |--- static_defense_to_now >  18.50
+|   |   |   |--- static_defense_to_now <= 26.00
+|   |   |   |   |--- class: 0
+|   |   |   |--- static_defense_to_now >  26.00
+|   |   |   |   |--- class: 0
+|   |--- walls_gates_to_now >  19.00
+|   |   |--- class: 1

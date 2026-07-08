@@ -1,0 +1,11 @@
+timing_feature,winner_samples,nonwinner_samples,winner_median_minute,nonwinner_median_minute,winner_25pct,winner_75pct,difference_nonwinner_minus_winner
+first_castle_minute,29,63,20.67,20.43,17.8,22.82,-0.23
+first_cavalry_minute,35,117,1.02,1.02,0.54,1.15,0.0
+first_econ_structure_minute,35,116,2.02,2.23,1.42,2.4,0.22
+first_infantry_minute,25,92,7.55,7.35,6.22,9.63,-0.2
+first_prod_structure_minute,35,114,5.3,5.69,4.22,5.93,0.39
+first_ranged_minute,31,74,12.17,13.74,11.06,17.65,1.57
+first_siege_minute,24,34,30.61,25.55,25.19,35.71,-5.06
+first_static_defense_minute,32,89,8.41,9.63,5.3,12.08,1.22
+first_upgrade_minute,35,117,0.0,0.0,0.0,0.48,0.0
+first_wall_gate_minute,13,43,8.98,13.15,6.43,10.75,4.17

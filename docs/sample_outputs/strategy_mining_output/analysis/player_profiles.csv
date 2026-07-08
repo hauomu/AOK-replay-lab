@@ -1,0 +1,118 @@
+name,games,win_rate,kills,losses,avg_apm,avg_units,avg_static,avg_cavalry,avg_ranged,avg_infantry,avg_siege,kl_ratio,common_role
+shermanator,19,0.579,5539,5482,3.810526315789474,343.94736842105266,12.947368421052632,87.10526315789474,87.26315789473684,81.26315789473684,70.0,1.01,Mixed/support
+Player 5,6,0.333,1346,2531,1.0666666666666667,486.8333333333333,0.3333333333333333,1.0,43.833333333333336,272.5,8.333333333333334,0.532,Mass-production support
+Southern,4,0.25,1044,772,3.425,205.5,10.5,0.75,48.75,83.0,0.0,1.352,Mixed/support
+Player 7,4,0.0,775,1498,0.0,387.25,0.0,0.75,33.5,210.5,3.25,0.517,Mass-production support
+Player 8,4,0.0,422,1027,0.0,266.25,0.25,1.0,14.0,155.5,0.0,0.411,Mass-production support
+Player 6,3,0.333,660,995,0.0,377.6666666666667,0.0,1.0,33.0,202.66666666666666,4.333333333333333,0.663,Mixed/support
+Karikaim,2,1.0,1034,450,8.65,335.0,8.0,77.0,99.0,11.5,50.5,2.298,Cavalry pressure / mobile carry
+Haxicon,2,0.0,620,914,3.95,458.5,12.5,94.0,124.0,153.0,57.0,0.678,Mixed firepower + mobile pressure
+walrus,2,0.0,600,1220,5.35,703.5,9.0,1.0,0.0,617.5,0.0,0.492,Mass-production support
+xLongSwordx,2,0.5,399,432,3.7,316.0,9.5,32.5,48.5,186.0,44.0,0.924,Mixed/support
+MegaDuke,2,0.5,166,291,5.050000000000001,196.5,23.0,1.0,58.5,73.0,0.0,0.57,Mixed/support
+Player 4,1,0.0,905,1124,2.0,1070.0,23.0,1.0,126.0,646.0,0.0,0.805,Main combat carry / pressure leader
+Beagle,1,0.0,809,765,5.6,740.0,4.0,19.0,336.0,299.0,209.0,1.058,Main combat carry / pressure leader
+Turquetil,1,0.0,697,619,5.3,584.0,4.0,119.0,120.0,237.0,85.0,1.126,Siege-support player
+TenPing,1,0.0,667,681,6.6,651.0,13.0,115.0,114.0,222.0,111.0,0.979,Siege-support player
+Derek,1,0.0,610,288,5.3,97.0,167.0,1.0,0.0,0.0,14.0,2.118,Defensive anchor / wall player
+blank,1,0.0,608,586,3.5,728.0,18.0,1.0,165.0,473.0,11.0,1.038,Ranged firepower/support
+dirtmuscle,1,0.0,585,305,5.7,441.0,168.0,10.0,68.0,236.0,29.0,1.918,Defensive anchor / wall player
+SnoopyWoopy,1,0.0,566,615,3.9,586.0,2.0,61.0,100.0,342.0,0.0,0.92,Infantry + hand-cannon frontline
+Khuobol,1,0.0,565,538,6.7,542.0,14.0,89.0,192.0,212.0,96.0,1.05,Ranged firepower/support
+iNtErCePt,1,1.0,550,171,8.7,188.0,37.0,1.0,0.0,136.0,0.0,3.216,Mixed/support
+ScariLD,1,0.0,529,152,1.4,175.0,1.0,73.0,0.0,0.0,0.0,3.48,Mixed/support
+BigDaddy,1,1.0,479,646,3.9,726.0,18.0,1.0,34.0,542.0,0.0,0.741,Mass-production support
+JuliusCaesar,1,1.0,438,793,5.7,930.0,7.0,24.0,46.0,740.0,21.0,0.552,Mass-production support
+Starkiller,1,0.0,413,468,8.1,515.0,21.0,1.0,4.0,0.0,51.0,0.882,Siege-support player
+SUPERBIBO,1,0.0,370,297,3.2,257.0,33.0,116.0,55.0,11.0,18.0,1.246,Cavalry pressure / mobile carry
+ManJusaKaTT,1,0.0,358,426,7.2,455.0,2.0,99.0,0.0,207.0,3.0,0.84,Cavalry pressure / mobile carry
+FANTASTIC,1,0.0,356,167,5.4,346.0,13.0,1.0,0.0,223.0,0.0,2.132,Mass-production support
+Wyatt,1,0.0,352,422,9.2,590.0,14.0,1.0,4.0,472.0,0.0,0.834,Mass-production support
+Vilscos,1,0.0,325,419,3.9,378.0,1.0,1.0,0.0,302.0,0.0,0.776,Mass-production support
+Actulot,1,1.0,295,260,5.0,394.0,11.0,255.0,141.0,0.0,0.0,1.135,Cavalry pressure / mobile carry
+nany,1,0.0,275,154,0.0,159.0,3.0,1.0,0.0,87.0,0.0,1.786,Mixed/support
+Somchaii,1,0.0,270,494,3.6,441.0,6.0,1.0,261.0,25.0,0.0,0.547,Ranged firepower/support
+FriendlyBus,1,0.0,252,220,3.0,188.0,27.0,92.0,0.0,0.0,0.0,1.145,Cavalry pressure / mobile carry
+Zergkilla,1,1.0,239,146,5.4,291.0,3.0,1.0,84.0,128.0,76.0,1.637,Siege-support player
+Lyle,1,0.0,228,194,7.9,171.0,5.0,1.0,7.0,48.0,4.0,1.175,Mixed/support
+Shiftmagic,1,0.0,225,196,8.5,360.0,1.0,48.0,97.0,125.0,0.0,1.148,Mass-production support
+Delta,1,0.0,224,116,4.2,135.0,16.0,15.0,0.0,25.0,2.0,1.931,Mixed/support
+Metalkim,1,0.0,218,161,4.0,174.0,6.0,2.0,0.0,81.0,3.0,1.354,Mixed/support
+Johan,1,0.0,211,260,6.4,352.0,19.0,23.0,85.0,96.0,19.0,0.812,Mass-production support
+strife,1,1.0,203,135,9.9,228.0,7.0,145.0,8.0,0.0,0.0,1.504,Cavalry pressure / mobile carry
+HolyBaconBit,1,0.0,193,348,2.3,324.0,6.0,1.0,75.0,196.0,17.0,0.555,Mass-production support
+Spanky,1,0.0,193,99,2.7,80.0,16.0,9.0,20.0,24.0,1.0,1.949,Mixed/support
+Jason,1,0.0,190,257,2.6,239.0,2.0,31.0,60.0,66.0,12.0,0.739,Mixed/support
+Skyblayde,1,0.0,189,247,3.6,230.0,8.0,147.0,95.0,0.0,7.0,0.765,Cavalry pressure / mobile carry
+SellJack,1,0.0,182,169,4.8,143.0,10.0,1.0,11.0,45.0,0.0,1.077,Mixed/support
+Swarm,1,0.0,173,82,9.8,142.0,1.0,1.0,16.0,81.0,0.0,2.11,Mixed/support
+lictenstine,1,0.0,167,162,4.8,195.0,17.0,20.0,0.0,98.0,0.0,1.031,Mixed/support
+bedwarnoob,1,0.0,166,103,7.3,170.0,1.0,1.0,22.0,61.0,2.0,1.612,Mixed/support
+ectobuilder,1,1.0,161,178,3.6,250.0,18.0,46.0,8.0,12.0,71.0,0.904,Siege-support player
+Smashmore,1,0.0,152,216,4.5,299.0,30.0,36.0,84.0,95.0,0.0,0.704,Mixed/support
+Player 2,1,0.0,151,152,3.8,291.0,4.0,1.0,16.0,142.0,12.0,0.993,Mixed/support
+EMPTY,1,0.0,142,118,5.2,225.0,6.0,133.0,0.0,0.0,0.0,1.203,Cavalry pressure / mobile carry
+Zigorath,1,0.0,141,174,3.8,265.0,9.0,1.0,147.0,0.0,123.0,0.81,Siege-support player
+Orenz,1,1.0,130,203,6.2,299.0,37.0,27.0,53.0,91.0,10.0,0.64,Mixed/support
+Acherus,1,0.0,107,91,3.7,113.0,0.0,1.0,0.0,58.0,0.0,1.176,Mixed/support
+Tigus,1,0.0,107,99,5.2,78.0,9.0,1.0,20.0,16.0,0.0,1.081,Mixed/support
+Nemilosrdny,1,0.0,105,260,7.5,286.0,32.0,57.0,0.0,112.0,0.0,0.404,Mixed/support
+LKJ,1,1.0,102,129,11.2,279.0,4.0,42.0,64.0,97.0,13.0,0.791,Mixed/support
+Silkscorpion,1,0.0,102,241,4.4,249.0,14.0,1.0,109.0,74.0,0.0,0.423,Mixed/support
+KilledJoy,1,0.0,100,98,4.8,103.0,14.0,1.0,7.0,51.0,2.0,1.02,Mixed/support
+RubberDuckie,1,0.0,91,168,4.4,179.0,3.0,12.0,11.0,82.0,9.0,0.542,Mixed/support
+TheRealNoima,1,0.0,88,73,17.4,211.0,1.0,1.0,34.0,93.0,4.0,1.205,Mixed/support
+MasterShejdu,1,1.0,86,129,6.0,238.0,29.0,1.0,23.0,71.0,3.0,0.667,Mixed/support
+Sighbull,1,0.0,86,46,3.9,109.0,0.0,1.0,0.0,62.0,0.0,1.87,Mixed/support
+Bushi,1,0.0,81,181,3.1,160.0,28.0,21.0,24.0,55.0,3.0,0.448,Mixed/support
+devbyzero,1,0.0,79,145,0.0,119.0,8.0,1.0,0.0,49.0,0.0,0.545,Mixed/support
+SmelJey,1,0.0,72,66,6.3,118.0,10.0,13.0,27.0,31.0,0.0,1.091,Mixed/support
+slanktank,1,1.0,69,133,2.7,201.0,3.0,33.0,24.0,74.0,18.0,0.519,Mixed/support
+GrouNdZerO,1,0.0,67,140,7.3,139.0,37.0,1.0,1.0,54.0,3.0,0.479,Mixed/support
+Devistator,1,0.0,61,104,3.4,114.0,1.0,14.0,17.0,18.0,0.0,0.587,Mixed/support
+kris,1,0.0,60,76,1.0,79.0,3.0,20.0,9.0,24.0,0.0,0.789,Mixed/support
+chikenbagelz,1,1.0,56,37,6.5,95.0,6.0,1.0,16.0,16.0,16.0,1.514,Mixed/support
+Tofu,1,0.0,51,51,8.7,179.0,15.0,1.0,15.0,72.0,0.0,1.0,Mixed/support
+EvilPebbles,1,0.0,50,81,2.5,69.0,1.0,1.0,0.0,17.0,15.0,0.617,Mixed/support
+KingKobra,1,0.0,50,86,3.3,88.0,13.0,7.0,14.0,0.0,0.0,0.581,Mixed/support
+RunoLight,1,0.0,46,58,8.7,104.0,10.0,10.0,10.0,13.0,8.0,0.793,Mixed/support
+Popmasato,1,0.0,45,136,1.0,127.0,0.0,1.0,0.0,103.0,0.0,0.331,Mixed/support
+Eatpie,1,1.0,39,78,3.2,122.0,36.0,6.0,15.0,47.0,3.0,0.5,Mixed/support
+Massacre,1,0.0,39,54,3.4,102.0,1.0,1.0,0.0,47.0,0.0,0.722,Mixed/support
+Smoggytag,1,0.0,38,117,3.2,118.0,2.0,1.0,0.0,79.0,0.0,0.325,Mixed/support
+ruken,1,0.0,36,39,3.5,123.0,3.0,36.0,12.0,22.0,0.0,0.923,Mixed/support
+Matrixx,1,0.0,32,45,2.9,64.0,11.0,1.0,32.0,0.0,0.0,0.711,Mixed/support
+regensis,1,0.0,32,82,0.0,69.0,1.0,1.0,10.0,0.0,0.0,0.39,Mixed/support
+UltraMarines,1,0.0,30,170,2.6,128.0,22.0,1.0,9.0,55.0,0.0,0.176,Mixed/support
+Asklepius,1,0.0,29,133,6.1,120.0,2.0,1.0,25.0,41.0,0.0,0.218,Mixed/support
+Rnaglie,1,0.0,29,51,1.8,42.0,3.0,1.0,8.0,10.0,0.0,0.569,Mixed/support
+DrRobot,1,1.0,27,26,2.1,78.0,1.0,1.0,0.0,35.0,0.0,1.038,Mixed/support
+luciano,1,0.0,23,116,1.2,94.0,5.0,2.0,1.0,45.0,0.0,0.198,Mixed/support
+Naian,1,0.0,22,63,4.8,64.0,0.0,1.0,0.0,19.0,0.0,0.349,Mixed/support
+Zergkiller,1,0.0,22,33,4.2,83.0,0.0,1.0,8.0,30.0,0.0,0.667,Mixed/support
+DarkSouL,1,0.0,20,46,0.1,45.0,0.0,15.0,0.0,0.0,0.0,0.435,Mixed/support
+FeniksRU,1,0.0,20,74,5.6,78.0,20.0,1.0,0.0,26.0,0.0,0.27,Mixed/support
+RaccoonGuyy,1,1.0,18,72,8.0,128.0,3.0,1.0,24.0,47.0,9.0,0.25,Mixed/support
+Danadão,1,0.0,15,88,3.4,148.0,9.0,95.0,10.0,2.0,0.0,0.17,Cavalry pressure / mobile carry
+Blest,1,0.0,14,31,2.6,53.0,0.0,1.0,5.0,5.0,0.0,0.452,Mixed/support
+Bouncinbobby,1,1.0,10,76,2.5,131.0,4.0,11.0,15.0,25.0,5.0,0.132,Mixed/support
+Rebanik,1,0.0,9,27,1.9,55.0,4.0,1.0,5.0,15.0,0.0,0.333,Mixed/support
+Dein,1,1.0,7,116,6.5,212.0,5.0,100.0,99.0,0.0,0.0,0.06,Cavalry pressure / mobile carry
+Destructo,1,0.0,6,71,1.6,58.0,1.0,5.0,10.0,15.0,0.0,0.085,Mixed/support
+RoCkITMaN,1,0.0,6,44,2.1,63.0,1.0,15.0,0.0,0.0,0.0,0.136,Mixed/support
+haidi,1,0.0,6,20,2.8,20.0,0.0,1.0,0.0,0.0,0.0,0.3,Mixed/support
+Autumn,1,0.0,2,12,10.4,73.0,3.0,9.0,0.0,0.0,0.0,0.167,Mixed/support
+Gumer,1,0.0,1,79,5.6,223.0,24.0,1.0,56.0,99.0,18.0,0.013,Mixed/support
+Hallrunner,1,0.0,1,13,0.3,20.0,0.0,1.0,0.0,0.0,0.0,0.077,Mixed/support
+Krieger,1,0.0,1,16,6.7,68.0,9.0,10.0,0.0,0.0,0.0,0.062,Mixed/support
+Dankski,1,0.0,0,12,2.1,81.0,0.0,37.0,11.0,0.0,0.0,0.0,Mixed/support
+KJackichan,1,0.0,0,8,5.5,50.0,2.0,8.0,5.0,0.0,0.0,0.0,Mixed/support
+Laszlo,1,0.0,0,0,1.6,0.0,0.0,0.0,0.0,0.0,0.0,,Mixed/support
+MattUK,1,0.0,0,3,2.3,40.0,12.0,1.0,0.0,10.0,0.0,0.0,Mixed/support
+Oha,1,0.0,0,12,3.8,73.0,0.0,1.0,0.0,15.0,0.0,0.0,Mixed/support
+Sparky,1,0.0,0,11,3.6,96.0,0.0,1.0,2.0,49.0,0.0,0.0,Mixed/support
+SupremeBean,1,0.0,0,14,4.2,63.0,2.0,1.0,4.0,14.0,0.0,0.0,Mixed/support
+TheMule,1,0.0,0,10,0.2,19.0,0.0,1.0,0.0,0.0,0.0,0.0,Mixed/support
+cyberstone,1,0.0,0,1,0.3,14.0,0.0,1.0,0.0,0.0,0.0,0.0,Mixed/support
+ninja,1,0.0,0,12,4.8,61.0,7.0,3.0,0.0,9.0,0.0,0.0,Mixed/support
+warblade,1,0.0,0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,Mixed/support

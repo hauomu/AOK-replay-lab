@@ -1,0 +1,41 @@
+duration_seconds,game_version,map_name,parser_ok,players,replay_id,source_name,warnings
+1168,60321,Age of Knights,True,8,6843f0df48c00171,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (10).SC2Replay,
+4642,60321,Age of Knights,True,8,4cc0fa2abca29384,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (11).SC2Replay,
+1800,60321,Age of Knights,True,8,1ef0d6fefa2acde5,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (12).SC2Replay,
+2193,60321,Age of Knights,True,8,003b05a190b91228,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (13).SC2Replay,
+3351,60321,Age of Knights,True,6,0cca3040eb9545a4,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (14).SC2Replay,
+1447,60321,Age of Knights,True,2,d17c2d2501990384,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (15).SC2Replay,
+3203,62848,Age of Knights,True,6,67591a9b6aaafcf8,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (16).SC2Replay,
+2153,62848,Age of Knights,True,8,afa8d3f691c00255,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (17).SC2Replay,
+3687,63454,Age of Knights,True,8,ebabf0dc4f9e18dd,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (18).SC2Replay,
+2857,65384,Age of Knights,True,8,c57d6e20dcac4a96,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (19).SC2Replay,
+,,,False,,e8c9cd423156d4e6,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (2).SC2Replay,parse failed: ImportError: protocol39576
+539,65895,Age of Knights,True,4,c1badb8b5a8ce38b,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (20).SC2Replay,
+4356,65895,Age of Knights,True,8,13e84b8814bbc631,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (21).SC2Replay,
+1023,72282,Age of Knights,True,8,233983c75be9d0f9,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (22).SC2Replay,
+4905,86383,Age of Knights,True,6,0842af3bba4fc343,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (23).SC2Replay,
+1216,86383,Age of Knights,True,8,42a8cccfe71e1c9e,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (24).SC2Replay,
+1667,86383,Age of Knights,True,6,3937906f9a644319,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (25).SC2Replay,
+2534,93333,Age of Knights,True,4,3d4fd38094996589,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (26).SC2Replay,
+,,,False,,d621219c1c592b87,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (3).SC2Replay,parse failed: ImportError: protocol47185
+,,,False,,080e144bb75fd43f,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (4).SC2Replay,parse failed: ImportError: protocol48258
+,,,False,,b823dfae60c9d15b,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (5).SC2Replay,parse failed: ImportError: protocol48258
+2225,60321,Age of Knights,True,8,5b6744d813b4fead,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (6).SC2Replay,
+4457,60321,Age of Knights,True,8,ea571ca2bcc53ece,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (7).SC2Replay,
+1731,60321,Age of Knights,True,8,99b69aeab1389863,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (8).SC2Replay,
+2247,60321,Age of Knights,True,8,e9672d475c544234,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights (9).SC2Replay,
+,,,False,,5c8512a08ba3a7ee,sherman_aok_replays.zip:Accounts/250707847/1-S2-1-4541527/Replays/Multiplayer/Age of Knights.SC2Replay,parse failed: ImportError: protocol39576
+1693,76114,Age of Knights,True,6,ea92aa84ef6bf3af,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (10).SC2Replay,
+,,,False,,48231c256ddd3979,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (100).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,8551b19c3ea963d0,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (101).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,36beabe52bf2734f,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (102).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,0a11148e1a294d35,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (103).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,50badc41c22386e6,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (104).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,b14c091a8dc0590c,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (105).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,521cd472fffa5a3b,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (106).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,55ac983e9c816daf,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (107).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,79401fadac82a86c,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (108).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,54566d1ff4839d5c,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (109).SC2Replay,parse failed: ImportError: protocol96883
+1522,77661,Age of Knights,True,4,eb2d4a7c4280691c,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (11).SC2Replay,
+,,,False,,8db64132940edc75,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (110).SC2Replay,parse failed: ImportError: protocol96883
+,,,False,,f2811c97ba56a5cf,sherman_aok_replays.zip:Accounts/250707847/2-S2-1-8333926/Replays/Multiplayer/Age of Knights (111).SC2Replay,parse failed: ImportError: protocol96883
