@@ -13,7 +13,7 @@ The project is intentionally split so the Discord bot can stay lightweight while
 
 ```text
 aok-replay-lab/
-├── discord_bot/        # Discord slash-command bot MVP v0.2
+├── discord_bot/        # Discord slash-command bot MVP v0.4
 ├── strategy_mining/    # Offline strategy mining / guide pipeline v0.1
 └── docs/               # Context, roadmap, handoff notes, sample outputs
 ```
@@ -22,6 +22,7 @@ aok-replay-lab/
 
 - Discord bot shell works in a private test server.
 - `/aok_analyze` parses Age of Knights replays using `mpyq` + Blizzard `s2protocol`.
+- `/aok_analyze` now supports team games, FFA/no-alliance games, duel-style games, and Player 15 / Animals tracking.
 - `/aok_leaderboard` and `/aok_player` use locally stored replay stats.
 - Replay summaries have been upgraded from basic K/D into role/style/team composition reads.
 - Offline strategy mining pipeline can generate CSV datasets, timing-window analysis, decision-tree-style win signals, and draft guide material.
@@ -126,3 +127,11 @@ Game assets/replays should stay local unless permission is clear.
 5. Generate first player guide from the offline strategy mining pipeline.
 6. Add optional Discord commands for published guide snippets.
 7. Keep anti-spam/onboarding as a separate future module, not part of replay MVP.
+
+## v0.3 note
+
+The Discord bot tracks **Player 15 as Animals / Neutral** inside `/aok_analyze`, separates animal K/D from human combat K/D, and produces a more summary-first report with team evaluations and player takeaways.
+
+## v0.4 note
+
+`/aok_analyze` adds **Free For All / no-alliance support**. FFA games are no longer collapsed into fake teams. Each active human player is evaluated as their own hostile side, while Player 15 remains a special Animals / Neutral actor. The report format now switches between team evaluation mode and FFA/player evaluation mode depending on the replay.
