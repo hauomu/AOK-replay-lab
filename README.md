@@ -151,3 +151,34 @@ The Discord replay analyzer is now at **v1.0**. In addition to the earlier team,
 When a replay build omits Terrazine fields, Iron is reported as `n/a`, not zero. Technology prerequisites and age placement remain explicitly labelled as inferred until confirmed from AoK map data.
 
 See [`docs/AOK_ANALYZE_V1_0_TECH_RESOURCES.md`](docs/AOK_ANALYZE_V1_0_TECH_RESOURCES.md) and the versioned implementation notes under `docs/` for the complete progression from v0.3 through v1.0.
+
+## Docker deployment
+
+The repository includes a Docker Compose deployment for the Discord bot. Runtime
+configuration and data stay outside the image:
+
+- `.env` at the repository root contains the Discord configuration and is ignored by Git.
+- `data/` at the repository root contains the SQLite database, uploads, replays, and reports.
+- the container restarts automatically unless it was explicitly stopped.
+- Blizzard `s2protocol` is pinned to a specific upstream commit for reproducible builds.
+
+Initial deployment:
+
+```bash
+git clone https://github.com/hauomu/AOK-replay-lab.git ~/aok-bot
+cd ~/aok-bot
+cp discord_bot/.env.example .env
+mkdir -p data
+# Edit .env before starting the bot.
+GIT_COMMIT="$(git rev-parse HEAD)" docker compose up --detach --build
+```
+
+Subsequent Tomo updates can be run from the repository root:
+
+```bash
+bash scripts/deploy_tomo.sh
+```
+
+The update script creates a timestamped SQLite backup, fast-forwards `main`,
+rebuilds the image, recreates the bot container, and prints the deployed Git
+revision and recent logs.

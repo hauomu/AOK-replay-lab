@@ -1,0 +1,16 @@
+services:
+  bot:
+    build:
+      context: ./discord_bot
+      args:
+        VCS_REF: ${GIT_COMMIT:-unknown}
+    image: aok-replay-lab:${IMAGE_TAG:-latest}
+    container_name: aok-replay-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /app/data
+      DATABASE_PATH: /app/data/aok_bot.sqlite3
+    volumes:
+      - ./data:/app/data
