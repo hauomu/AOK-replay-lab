@@ -18,6 +18,7 @@ env/
 !.env.example
 
 # Bot/runtime data
+/data/
 discord_bot/data/*.sqlite3
 discord_bot/data/*.db
 discord_bot/data/replays/
