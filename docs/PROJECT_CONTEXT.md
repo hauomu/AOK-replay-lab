@@ -16,7 +16,7 @@ Sherman is a moderator in the AoK Discord server but does not currently have per
 
 1. Test the bot in Sherman's private Discord test server.
 2. Produce a working demo.
-3. Ask TwoDie/server owner to test-deploy the bot. 
+3. Ask TwoDie/server owner to test-deploy the bot or create the official AoK bot application.
 
 ## Scope separation
 

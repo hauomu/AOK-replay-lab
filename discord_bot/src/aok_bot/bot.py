@@ -135,8 +135,10 @@ async def aok_player(interaction: discord.Interaction, name: str):
     lines = [
         f"**{profile['name']} AoK profile**",
         f"Games in local database: **{profile['games']}**",
-        f"Kills/losses: **{profile['kills']} / {profile['losses']}**",
-        f"K/L ratio: **{profile['kill_loss_ratio']}**",
+        f"PvP kills/losses: **{profile['kills']} / {profile['losses']}**",
+        f"PvP K/L ratio: **{profile['kill_loss_ratio']}**",
+        f"Animal K/D: **{profile.get('animal_kills', 0)} / {profile.get('deaths_to_animals', 0)}**",
+        f"Animal K/D ratio: **{profile.get('animal_kill_loss_ratio')}**",
         f"Units born: **{profile['units_born']}**",
         f"Commands: **{profile['commands']}**",
         f"Avg APM: **{profile['avg_apm']}**",
@@ -156,7 +158,9 @@ async def aok_leaderboard(interaction: discord.Interaction):
     for i, r in enumerate(rows, start=1):
         lines.append(
             f"{i}. **{r['name']}** — games {r['games']}, "
-            f"kills {r['kills']}, losses {r['losses']}, K/L {r['klr']}, avg APM {r['avg_apm']}"
+            f"PvP {r['kills']}/{r['losses']} K/L {r['klr']}, "
+            f"animals {r.get('animal_kills', 0)}/{r.get('deaths_to_animals', 0)}, "
+            f"avg APM {r['avg_apm']}"
         )
     await interaction.response.send_message("\n".join(lines)[:1900])
 

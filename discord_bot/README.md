@@ -179,3 +179,41 @@ The MVP does not fully extract SC2 map MPQ data yet, but it reserves this folder
 - SC2Arcade is used only for public lobby/match metadata.
 - Full gameplay reconstruction still needs actual `.SC2Replay` files.
 - The bot is intentionally framed as a replay/statistics/coach bot, not an automation or cheat bot.
+
+## v1.0 replay analyzer
+
+The current `/aok_analyze` implementation supports:
+
+- `.SC2Replay` and ZIP uploads
+- team games, duels, and FFA/no-alliance games
+- leave-based result inference
+- Player 15 neutral-animal K/D
+- grouped player and timeline tables
+- exact mechanical-unit and trebuchet-state tracking
+- age, technology-structure, upgrade, and unit-unlock evaluation
+- Gold/Wood/Iron resource snapshots
+- local SQLite player profiles and leaderboards
+
+AoK tracker resources are mapped as follows:
+
+```text
+Gold = Minerals
+Wood = Vespene
+Iron = Terrazine
+```
+
+Stockpile and collection rates come from `SPlayerStatsEvent` when present. Gathered/lost totals are estimates, and Iron is shown as `n/a` when the replay does not expose Terrazine fields. Technology requirements are labelled as inferred unless represented by an explicit replay event.
+
+The exact mechanical allowlist is:
+
+```text
+Ballista
+Battering Ram
+Bombard Cannon
+Catapult
+Explosives Wagon
+Trebuchet (Move Mode)
+Trebuchet (Siege Mode)
+```
+
+`HandCannoneer` is not treated as mechanical. Trebuchet move-mode deaths count as mechanical losses, while trebuchet kills are credited only in siege mode.
