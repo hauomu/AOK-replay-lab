@@ -1,57 +1,60 @@
-# AoK `/aok_analyze` v0.4 — FFA / No-Alliance Support
+# `/aok_analyze` v0.4: Free-for-all / no-alliance support
 
-## Purpose
+## Problem fixed
 
-The analyzer previously assumed that Age of Knights displays were mostly team games. This caused Free For All / no-alliance games to be summarized incorrectly as if all players belonged to the same team.
+Older analyzer versions assumed that an AoK replay should be evaluated as a team game. In Free For All/no-alliance displays, the replay can encode all human players under the same `m_teamId`, which caused the bot to merge every player into one side.
 
-v0.4 adds explicit match-mode detection and FFA reporting.
+That made these reports wrong for FFA:
 
-## Required behavior
+- winner/side detection
+- team evidence table
+- turning-point read
+- player/team K/L aggregation
+- verdict and player takeaway
 
-`/aok_analyze` should detect whether a replay is:
+## v0.4 behavior
 
-- Team game
-- Free-for-all / no-alliance
-- Duel-style game
-- Team game with Player 15 animals / neutral units
+The analyzer now detects FFA-like displays and treats every human player as their own hostile side.
 
-For FFA games, do **not** merge players into one team. Each player should be treated as their own hostile side.
+Detection rules:
 
-## FFA output shape
+- 3+ players and all players have the same `m_teamId` → `Free-for-all`
+- 3+ players and every player already has a unique `m_teamId` → `Free-for-all`
+- 2 players with unique team IDs → `Duel`
+- otherwise → `Team`
 
-For FFA/no-alliance games, the Discord summary should prioritize:
+When the replay stores all FFA players under one team id, v0.4 rewrites analysis groups internally so each player gets their own side. This affects analysis only; it does not modify the replay.
 
-- Match mode: Free-for-all
-- Winner if recorded, otherwise likely leader / strongest conversion profile
-- Per-player combat conversion
-- PvP kills and losses
-- Animal interaction if Player 15 exists
-- Turning point / collapse window if detectable
-- Most useful player takeaway
+## Reporting changes
 
-## Implementation notes
+The report now includes:
 
-The parser should infer FFA when alliance/team metadata does not produce meaningful teams, or when every active human player appears hostile/unallied.
+- `Match mode: Free-for-all`
+- FFA/player evaluations instead of team-only evaluation
+- side labels using player names rather than `Team 0` / `Team 1`
+- FFA-aware turning point text
+- FFA-aware player takeaway
+- likely leader inference when the replay metadata does not record a clean winner
 
-Avoid presenting fake teams in FFA mode. Use player-centric analysis instead.
+## Winner handling
 
-## Player 15 / animals
-
-Player 15 remains a special neutral actor:
+Some AoK FFA displays do not mark a clean `Win` result in replay metadata. In those cases, v0.4 does not pretend there is an official winner. It reports:
 
 ```text
-Player 15 = Animals / Neutral
+Not recorded; likely leader: <player>
 ```
 
-Animal kills, animal deaths, and deaths caused by animals should still be tracked in both team and FFA modes.
+The likely leader heuristic is based on:
 
-## Guide value
+1. PvP kill/loss margin
+2. PvP K/L ratio
+3. units born
+4. command activity
 
-FFA reports are especially useful for detecting:
+This is intentionally labelled as likely/inferred, not official.
 
-- strongest individual macro/combat profile
-- inefficient aggression
-- who fed units into static defenses or animals
-- who survived longest
-- who converted production into effective kills
-- when the match became one-sided
+## Compatibility
+
+Team games still use the previous team aggregation behavior.
+
+Player 15 / Animals tracking from v0.3 is still preserved.

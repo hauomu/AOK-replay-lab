@@ -135,3 +135,19 @@ The Discord bot tracks **Player 15 as Animals / Neutral** inside `/aok_analyze`,
 ## v0.4 note
 
 `/aok_analyze` adds **Free For All / no-alliance support**. FFA games are no longer collapsed into fake teams. Each active human player is evaluated as their own hostile side, while Player 15 remains a special Animals / Neutral actor. The report format now switches between team evaluation mode and FFA/player evaluation mode depending on the replay.
+
+## v1.0 update
+
+The Discord replay analyzer is now at **v1.0**. In addition to the earlier team, FFA, duel, and Player 15 support, reports now include:
+
+- leave-based result inference when official replay metadata is unclear
+- readable grouped player and timeline tables
+- exact mechanical-unit tracking, including trebuchet move/siege state
+- observed and inferred age, technology-structure, upgrade, and unit-unlock progression
+- resource snapshots using **Gold = Minerals, Wood = Vespene, Iron = Terrazine**
+- current stockpile and collection-rate data when exposed by `SPlayerStatsEvent`
+- clearly labelled estimated gathered/lost resource values
+
+When a replay build omits Terrazine fields, Iron is reported as `n/a`, not zero. Technology prerequisites and age placement remain explicitly labelled as inferred until confirmed from AoK map data.
+
+See [`docs/AOK_ANALYZE_V1_0_TECH_RESOURCES.md`](docs/AOK_ANALYZE_V1_0_TECH_RESOURCES.md) and the versioned implementation notes under `docs/` for the complete progression from v0.3 through v1.0.
