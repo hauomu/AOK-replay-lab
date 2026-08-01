@@ -22,3 +22,5 @@
 - Safe rejection test: passed. A synthetic commit pushed directly to disposable branch `stage2-validation-20260801-1` was rejected with GitHub `GH013` because changes must be made through a pull request. The disposable branch and temporary ruleset target were deleted afterward.
 - Rollback: before merge, close PR #4, delete `stage2/ci-and-protection-20260801`, and delete ruleset `20175964`; after merge, revert the workflow/documentation through a new PR and restore the captured ruleset configuration. Never force-push or rewrite `main`.
 - Remaining blockers: manual human merge of PR #4. Stage 3 and later work is out of scope.
+
+- Follow-up correction: after PR review identified that the project requires Python 3.11, the workflow was pinned from floating `3.x` to `3.11` in commit `c3c8c0cf4885d96b10acd1a6f07406e19681839e`; the same two required checks were rerun and must pass on the final documentation commit.
