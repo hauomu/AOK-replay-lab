@@ -18,13 +18,13 @@ class ArcadeLobby:
 
 
 class SC2ArcadeClient:
-    def __init__(self, user_agent: str = "AoKReplayAnalyzer/0.2"):
-        # Important: the public WebAPI host is api.sc2arcade.com, not sc2arcade.com/api.
-        # The website may use /api internally for some pages, but lobbies/history returns
-        # 403 there in many environments.
+    def __init__(self, user_agent: str = "AoKReplayAnalyzer/1.1"):
+        # Important: the public WebAPI host is api.sc2arcade.com, not
+        # sc2arcade.com/api. The website fallback remains for older endpoints
+        # that may still be proxied through the frontend host.
         self.base_urls = [
             "https://api.sc2arcade.com",
-            "https://sc2arcade.com/api",  # fallback for endpoints that still proxy through the website
+            "https://sc2arcade.com/api",
         ]
         self.headers = {
             "User-Agent": user_agent,
@@ -34,7 +34,8 @@ class SC2ArcadeClient:
 
     async def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         last_error: Exception | None = None
-        async with aiohttp.ClientSession(headers=self.headers) as session:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(headers=self.headers, timeout=timeout) as session:
             for base_url in self.base_urls:
                 url = f"{base_url}{path}"
                 try:
@@ -72,6 +73,36 @@ class SC2ArcadeClient:
         if isinstance(data, list):
             return data
         return []
+
+    async def get_map_details(
+        self,
+        region_id: int,
+        map_id: int,
+        *,
+        locale: str = "enUS",
+        major_version: int = 0,
+        minor_version: int = 0,
+    ) -> dict[str, Any]:
+        """Return rich map metadata, including localized patch-note sections."""
+
+        params: dict[str, Any] = {"locale": locale}
+        if major_version:
+            params["majorVersion"] = major_version
+        if minor_version:
+            params["minorVersion"] = minor_version
+        data = await self._get_json(
+            f"/maps/{region_id}/{map_id}/details",
+            params=params,
+        )
+        if not isinstance(data, dict):
+            raise RuntimeError("SC2Arcade map-details response was not a JSON object")
+        return data
+
+    async def get_map_versions(self, region_id: int, map_id: int) -> dict[str, Any]:
+        data = await self._get_json(f"/maps/{region_id}/{map_id}/versions")
+        if not isinstance(data, dict):
+            raise RuntimeError("SC2Arcade map-versions response was not a JSON object")
+        return data
 
     async def get_map_dependencies(self, region_id: int, map_id: int) -> dict[str, Any]:
         data = await self._get_json(f"/maps/{region_id}/{map_id}/dependencies")
