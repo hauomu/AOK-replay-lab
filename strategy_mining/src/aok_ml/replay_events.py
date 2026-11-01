@@ -155,16 +155,24 @@ def _pid_to_index(pid: Any, n: int) -> int | None:
     return None
 
 
-def _uid_to_index(uid: Any, n: int) -> int | None:
-    if uid is None:
-        return None
+def user_player_indices(player_list: list[Any], initdata: Any) -> dict[int, int]:
+    """Map game-event user IDs to replay.details player indices.
+
+    User IDs are lobby user slots, not player-list positions; AI players and
+    observers shift them. Falls back to identity when initData has no usable slots.
+    """
     try:
-        i = int(uid)
-    except Exception:
-        return None
-    if 0 <= i < n:
-        return i
-    return None
+        slots = initdata["m_syncLobbyState"]["m_lobbyState"]["m_slots"]
+    except (KeyError, TypeError):
+        slots = []
+    mapping: dict[int, int] = {}
+    for index, player in enumerate(player_list):
+        slot = player.get("m_workingSetSlotId") if isinstance(player, dict) else None
+        if isinstance(slot, int) and 0 <= slot < len(slots):
+            user_id = slots[slot].get("m_userId") if isinstance(slots[slot], dict) else None
+            if isinstance(user_id, int):
+                mapping[user_id] = index
+    return mapping or {index: index for index in range(len(player_list))}
 
 
 def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedReplay:
@@ -182,6 +190,11 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
         protocol = versions.build(base_build)
         ex.game_version = str(base_build)
         details = protocol.decode_replay_details(archive.read_file("replay.details"))
+        try:
+            initdata = protocol.decode_replay_initdata(archive.read_file("replay.initData"))
+        except Exception:
+            initdata = None
+        user_index = user_player_indices(details.get("m_playerList", []), initdata)
         ex.map_name = clean_name(details.get("m_title"), fallback="Unknown")
 
         players = []
@@ -208,7 +221,7 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
             for ev in protocol.decode_replay_game_events(archive.read_file("replay.game.events")):
                 loop = int(ev.get("_gameloop", 0) or 0)
                 max_loop = max(max_loop, loop)
-                uid = _uid_to_index(ev.get("_userid", {}).get("m_userId"), len(players))
+                uid = user_index.get(ev.get("_userid", {}).get("m_userId"))
                 if uid is None:
                     continue
                 name = ev.get("_event")
