@@ -17,6 +17,16 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Iterable
 
+_BOT_SRC = Path(__file__).resolve().parents[3] / "discord_bot" / "src"
+if str(_BOT_SRC) not in sys.path:
+    sys.path.insert(0, str(_BOT_SRC))
+from aok_bot.match_rules import classify_role as _shared_classify_role
+from aok_bot.match_rules import classify_team as _shared_classify_team
+from aok_bot.match_rules import is_neutral_player
+from aok_bot.match_rules import normalize_match_groups
+from aok_bot.match_rules import user_player_indices
+from aok_bot.protocols import select_protocol
+
 STRUCTURE_HINTS = (
     "House", "Farm", "Barracks", "Stable", "Archery", "Blacksmith", "Market", "Mill",
     "Lumber", "Mine", "Tower", "Castle", "Gate", "Wall", "Post", "Keep", "Town", "Hall",
@@ -132,6 +142,9 @@ class ExtractedReplay:
     source_name: str
     map_name: str | None = None
     game_version: str | None = None
+    decoder_build: str | None = field(default=None, kw_only=True)
+    game_events_complete: bool | None = field(default=None, kw_only=True)
+    tracker_events_complete: bool | None = field(default=None, kw_only=True)
     duration_seconds: int | None = None
     parser_ok: bool = False
     warnings: list[str] = field(default_factory=list)
@@ -141,6 +154,25 @@ class ExtractedReplay:
     player_stats: list[dict[str, Any]] = field(default_factory=list)
     team_stats: list[dict[str, Any]] = field(default_factory=list)
     timeline_snapshots: list[dict[str, Any]] = field(default_factory=list)
+    match_mode: str = "Unknown"
+
+
+def _attribute_death(stats_by_player: dict[int, dict[str, Any]], event: dict[str, Any]) -> None:
+    """Keep neutral animal combat out of player-vs-player kill/loss totals."""
+    owner_idx, killer_idx = event.get("player_index"), event.get("killer_player_index")
+    owner_is_animal = int(event.get("player_id") or 0) == 15
+    killer_is_animal = int(event.get("killer_player_id") or 0) == 15
+    if owner_is_animal:
+        if killer_idx is not None and not killer_is_animal and killer_idx in stats_by_player:
+            stats_by_player[killer_idx]["animal_kills"] += 1
+    elif owner_idx is not None and owner_idx in stats_by_player:
+        owner = stats_by_player[owner_idx]
+        if killer_is_animal:
+            owner["deaths_to_animals"] += 1
+        else:
+            owner["losses"] += 1
+            if killer_idx is not None and killer_idx != owner_idx and killer_idx in stats_by_player:
+                stats_by_player[killer_idx]["kills"] += 1
 
 
 def _pid_to_index(pid: Any, n: int) -> int | None:
@@ -155,39 +187,27 @@ def _pid_to_index(pid: Any, n: int) -> int | None:
     return None
 
 
-def user_player_indices(player_list: list[Any], initdata: Any) -> dict[int, int]:
-    """Map game-event user IDs to replay.details player indices.
-
-    User IDs are lobby user slots, not player-list positions; AI players and
-    observers shift them. Falls back to identity when initData has no usable slots.
-    """
-    try:
-        slots = initdata["m_syncLobbyState"]["m_lobbyState"]["m_slots"]
-    except (KeyError, TypeError):
-        slots = []
-    mapping: dict[int, int] = {}
-    for index, player in enumerate(player_list):
-        slot = player.get("m_workingSetSlotId") if isinstance(player, dict) else None
-        if isinstance(slot, int) and 0 <= slot < len(slots):
-            user_id = slots[slot].get("m_userId") if isinstance(slots[slot], dict) else None
-            if isinstance(user_id, int):
-                mapping[user_id] = index
-    return mapping or {index: index for index in range(len(player_list))}
-
 
 def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedReplay:
     data = path.read_bytes()
     replay_id = hashlib.sha256(data).hexdigest()[:16]
     source = source_name or path.name
     ex = ExtractedReplay(replay_id=replay_id, source_name=source)
+    replay_handle = None
 
     try:
         mpyq, versions = _load_protocol()
-        archive = mpyq.MPQArchive(str(path))
+        replay_handle = path.open("rb")
+        archive = mpyq.MPQArchive(replay_handle)
         header_content = archive.header["user_data_header"]["content"]
         header = versions.latest().decode_replay_header(header_content)
         base_build = header["m_version"]["m_baseBuild"]
-        protocol = versions.build(base_build)
+        protocol, decoder_build = select_protocol(versions, base_build)
+        ex.decoder_build = str(decoder_build)
+        if decoder_build != base_build:
+            ex.warnings.append(
+                f"Compatibility decoder: replay base build {base_build} uses protocol {decoder_build}; "
+                "mapping verified against the local replay corpus.")
         ex.game_version = str(base_build)
         details = protocol.decode_replay_details(archive.read_file("replay.details"))
         try:
@@ -206,8 +226,13 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
                 "player_id": idx + 1,
                 "name": clean_name(p.get("m_name"), f"Player {idx + 1}"),
                 "team_id": p.get("m_teamId"),
+                "raw_team_id": p.get("m_teamId"),
                 "result": result,
             })
+        ex.match_mode, groups = normalize_match_groups(players)
+        for player, group in zip(players, groups):
+            player["team_id"] = group
+            player["match_mode"] = ex.match_mode
         ex.players = players
 
         command_counts = Counter()
@@ -240,7 +265,10 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
                     if s is not None:
                         leave_seconds[uid] = s
         except Exception as exc:
-            ex.warnings.append(f"game events decode failed: {type(exc).__name__}: {exc}")
+            ex.game_events_complete = False
+            ex.warnings.append(f"game events decode failed: {type(exc).__name__}: {exc}. Command counts are partial; APM is unavailable.")
+        else:
+            ex.game_events_complete = True
 
         tag_owner: dict[tuple[int, int], int] = {}
         tag_type: dict[tuple[int, int], str] = {}
@@ -306,14 +334,16 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
                     killer_pid = ev.get("m_killerPlayerId")
                     owner_idx = _pid_to_index(owner_pid, len(players))
                     killer_idx = _pid_to_index(killer_pid, len(players))
-                    if owner_idx is not None and not category_for_unit(unit)["is_noise"]:
+                    if (owner_idx is not None or str(owner_pid) == "15") and not category_for_unit(unit)["is_noise"]:
                         unit_events.append({
                             "replay_id": replay_id, "source_name": source, "event_type": "unit_died",
                             "loop": loop, "seconds": seconds, "minute": minute,
-                            "player_index": owner_idx, "player_id": owner_idx + 1, "player_name": players[owner_idx]["name"],
-                            "team_id": players[owner_idx]["team_id"], "unit_type": unit,
+                            "player_index": owner_idx, "player_id": int(owner_pid) if owner_pid is not None else None,
+                            "player_name": players[owner_idx]["name"] if owner_idx is not None else "Animals / Player 15",
+                            "team_id": players[owner_idx]["team_id"] if owner_idx is not None else None, "unit_type": unit,
                             "killer_player_index": killer_idx, "killer_player_name": players[killer_idx]["name"] if killer_idx is not None else None,
                             "killer_team_id": players[killer_idx]["team_id"] if killer_idx is not None else None,
+                            "killer_player_id": int(killer_pid) if killer_pid is not None else None,
                             **category_for_unit(unit),
                         })
                 elif evname == "NNet.Replay.Tracker.SUpgradeEvent":
@@ -329,14 +359,29 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
                             **{k: 0 for k in category_for_unit("").keys()},
                         })
         except Exception as exc:
+            ex.tracker_events_complete = False
             ex.warnings.append(f"tracker events decode failed: {type(exc).__name__}: {exc}")
+            raise
+        else:
+            ex.tracker_events_complete = True
 
         ex.unit_events = unit_events
         duration = loops_to_seconds(max(max_loop, max_tracker_loop))
         ex.duration_seconds = duration
+        for event in unit_events:
+            event["match_mode"] = ex.match_mode
+            idx = event.get("player_index")
+            if idx is not None:
+                event["raw_team_id"] = players[idx]["raw_team_id"]
+            killer_idx = event.get("killer_player_index")
+            if killer_idx is not None:
+                event["killer_team_id"] = players[killer_idx]["team_id"]
+                event["killer_raw_team_id"] = players[killer_idx]["raw_team_id"]
 
         stats_by_player: dict[int, dict[str, Any]] = {}
         for p in players:
+            if is_neutral_player(p):
+                continue
             idx = p["player_index"]
             stats_by_player[idx] = {**p,
                 "source_name": source,
@@ -348,14 +393,19 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
                 "chat_messages": int(chat_counts[idx]),
                 "pings": int(ping_counts[idx]),
                 "leave_seconds": leave_seconds.get(idx),
-                "apm": round(command_counts[idx] / max(1, (duration or 1) / 60), 1) if duration else None,
-                "kills": 0, "losses": 0, "units_born": 0, "structures_done": 0,
+                "game_events_complete": ex.game_events_complete,
+                "apm": round(command_counts[idx] / max(1, (duration or 1) / 60), 1) if duration and ex.game_events_complete else None,
+                "kills": 0, "losses": 0, "animal_kills": 0, "deaths_to_animals": 0,
+                "units_born": 0, "structures_done": 0,
                 "static_defense": 0, "walls_gates": 0, "castles": 0,
                 "cavalry_units": 0, "ranged_units": 0, "infantry_units": 0, "siege_units": 0,
                 "econ_structures": 0, "production_structures": 0, "upgrades": 0,
             }
         for ev in unit_events:
             idx = ev.get("player_index")
+            if ev["event_type"] == "unit_died":
+                _attribute_death(stats_by_player, ev)
+                continue
             if idx is None or idx not in stats_by_player:
                 continue
             s = stats_by_player[idx]
@@ -375,11 +425,6 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
                 s["castles"] += int(ev["is_castle"])
                 s["econ_structures"] += int(ev["is_econ"])
                 s["production_structures"] += int(ev["is_production"])
-            elif ev["event_type"] == "unit_died":
-                s["losses"] += 1
-                killer_idx = ev.get("killer_player_index")
-                if killer_idx is not None and killer_idx != idx and killer_idx in stats_by_player:
-                    stats_by_player[killer_idx]["kills"] += 1
             elif ev["event_type"] == "upgrade":
                 s["upgrades"] += 1
 
@@ -417,7 +462,7 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
             tid = int(tid)
             acc = team_acc.setdefault(tid, {
                 "replay_id": replay_id, "source_name": source, "map_name": ex.map_name,
-                "team_id": tid, "players": [], "result": None, "duration_seconds": duration,
+                "team_id": tid, "match_mode": ex.match_mode, "players": [], "result": None, "duration_seconds": duration,
                 "kills": 0, "losses": 0, "units_born": 0, "structures_done": 0,
                 "static_defense": 0, "walls_gates": 0, "castles": 0, "cavalry_units": 0,
                 "ranged_units": 0, "infantry_units": 0, "siege_units": 0,
@@ -438,64 +483,48 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
         ex.replays = [{
             "replay_id": replay_id, "source_name": source, "map_name": ex.map_name,
             "game_version": ex.game_version, "duration_seconds": ex.duration_seconds,
-            "players": len(ex.players), "parser_ok": True, "warnings": "; ".join(ex.warnings),
+            "decoder_build": ex.decoder_build,
+            "game_events_complete": ex.game_events_complete, "tracker_events_complete": ex.tracker_events_complete,
+            "players": len(ex.players), "match_mode": ex.match_mode,
+            "parser_ok": True, "warnings": "; ".join(ex.warnings),
         }]
         ex.parser_ok = True
         return ex
     except Exception as exc:
         ex.warnings.append(f"parse failed: {type(exc).__name__}: {exc}")
-        ex.replays = [{"replay_id": replay_id, "source_name": source, "parser_ok": False, "warnings": "; ".join(ex.warnings)}]
+        ex.replays = [{"replay_id": replay_id, "source_name": source, "match_mode": ex.match_mode,
+                       "decoder_build": ex.decoder_build, "game_events_complete": ex.game_events_complete,
+                       "tracker_events_complete": ex.tracker_events_complete,
+                       "parser_ok": False, "warnings": "; ".join(ex.warnings)}]
         return ex
+    finally:
+        if replay_handle is not None:
+            replay_handle.close()
 
 
 def classify_role(s: dict[str, Any]) -> str:
-    units = max(1, int(s.get("cavalry_units",0)) + int(s.get("ranged_units",0)) + int(s.get("infantry_units",0)) + int(s.get("siege_units",0)))
-    static = int(s.get("static_defense",0)); wg = int(s.get("walls_gates",0))
-    if wg >= 60 or static >= 150 or (static / max(1, int(s.get("units_born",0)) + int(s.get("structures_done",0))) >= 0.22 and static >= 40):
-        return "Defensive anchor / wall player"
-    if int(s.get("cavalry_units",0)) >= 80 and int(s.get("cavalry_units",0)) / units >= 0.25:
-        return "Cavalry pressure / mobile carry"
-    if int(s.get("kills",0)) >= 800:
-        return "Main combat carry / pressure leader"
-    if int(s.get("ranged_units",0)) >= 150 and int(s.get("cavalry_units",0)) >= 100:
-        return "Mixed firepower + mobile pressure"
-    if int(s.get("ranged_units",0)) >= 150 and int(s.get("ranged_units",0)) / units >= 0.25:
-        return "Ranged firepower/support"
-    if int(s.get("infantry_units",0)) >= 250 and int(s.get("ranged_units",0)) >= 100:
-        return "Infantry + hand-cannon frontline"
-    if int(s.get("siege_units",0)) >= 40:
-        return "Siege-support player"
-    if int(s.get("units_born",0)) >= 300:
-        return "Mass-production support"
-    return "Mixed/support"
+    return _shared_classify_role(s)
 
 
 def classify_team(s: dict[str, Any]) -> str:
-    total = max(1, int(s.get("cavalry_units",0)) + int(s.get("ranged_units",0)) + int(s.get("infantry_units",0)) + int(s.get("siege_units",0)))
-    if int(s.get("walls_gates",0)) >= 100 or (int(s.get("static_defense",0)) >= 350 and int(s.get("walls_gates",0)) >= 70):
-        return "Turtle / layered-defense team"
-    if int(s.get("cavalry_units",0)) / total >= 0.30:
-        return "Mobile cavalry-pressure team"
-    if int(s.get("ranged_units",0)) / total >= 0.35:
-        return "Ranged/firepower-heavy team"
-    if int(s.get("infantry_units",0)) / total >= 0.40 and int(s.get("ranged_units",0)) / total >= 0.20:
-        return "Infantry + firepower frontline team"
-    if int(s.get("infantry_units",0)) / total >= 0.45:
-        return "Infantry-frontline-heavy team"
-    return "Mixed-composition team"
+    return _shared_classify_team(s)
 
 
 def build_snapshots(ex: ExtractedReplay) -> list[dict[str, Any]]:
     out = []
     for p in ex.players:
+        if is_neutral_player(p):
+            continue
         idx = p["player_index"]
-        evs = [e for e in ex.unit_events if e.get("player_index") == idx]
+        evs = [e for e in ex.unit_events if e.get("player_index") == idx
+               or (e["event_type"] == "unit_died" and e.get("killer_player_index") == idx)]
         for m in SNAPSHOT_MINUTES:
             cutoff = m
             prior = [e for e in evs if float(e.get("minute") or 0) <= cutoff]
             row = {
                 "replay_id": ex.replay_id, "source_name": ex.source_name, "map_name": ex.map_name,
                 "player_index": idx, "player_id": idx + 1, "player_name": p["name"], "team_id": p.get("team_id"),
+                "raw_team_id": p.get("raw_team_id"), "match_mode": ex.match_mode,
                 "result": p.get("result"), "snapshot_minute": m,
                 "kills_to_now": 0, "losses_to_now": 0,
                 "units_born_to_now": sum(1 for e in prior if e["event_type"] == "unit_born"),
@@ -511,8 +540,11 @@ def build_snapshots(ex: ExtractedReplay) -> list[dict[str, Any]]:
             # Losses and kills up to now.
             for e in prior:
                 if e["event_type"] == "unit_died":
-                    row["losses_to_now"] += 1
-                    if e.get("killer_player_index") == idx:
+                    if int(e.get("player_id") or 0) == 15 or int(e.get("killer_player_id") or 0) == 15:
+                        continue
+                    if e.get("player_index") == idx:
+                        row["losses_to_now"] += 1
+                    if e.get("killer_player_index") == idx and e.get("player_index") not in (None, idx):
                         row["kills_to_now"] += 1
             out.append(row)
     return out

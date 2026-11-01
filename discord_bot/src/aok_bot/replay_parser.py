@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import html
 import importlib.machinery
 import importlib.util
@@ -8,12 +7,13 @@ import os
 import re
 import sys
 import types
-import zipfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 from .models import PlayerStats, ReplaySummary, TeamStats
+from .protocols import select_protocol
+from .match_rules import classify_role, classify_team, normalize_match_groups, user_player_indices
 
 
 class ReplayParserError(RuntimeError):
@@ -135,43 +135,6 @@ IGNORED_UPGRADE_PREFIXES = (
 )
 
 
-def stable_copy_name(path: Path) -> str:
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()[:16]
-    safe_stem = ''.join(ch if ch.isalnum() or ch in '._- ' else '_' for ch in path.stem)
-    return f"{safe_stem}__{digest}{path.suffix}"
-
-
-def extract_replay_paths(input_path: Path, replays_dir: Path) -> list[Path]:
-    """Copy/extract a .SC2Replay or .zip to the bot replay folder and return replay paths."""
-    replays_dir.mkdir(parents=True, exist_ok=True)
-    suffix = input_path.suffix.lower()
-
-    if suffix == ".sc2replay":
-        out = replays_dir / stable_copy_name(input_path)
-        out.write_bytes(input_path.read_bytes())
-        return [out]
-
-    if suffix == ".zip":
-        found: list[Path] = []
-        with zipfile.ZipFile(input_path) as zf:
-            for member in zf.infolist():
-                if member.is_dir():
-                    continue
-                if not member.filename.lower().endswith(".sc2replay"):
-                    continue
-                raw_name = Path(member.filename).name
-                with zf.open(member) as src:
-                    data = src.read()
-                digest = hashlib.sha256(data).hexdigest()[:16]
-                safe_name = ''.join(ch if ch.isalnum() or ch in '._- ' else '_' for ch in raw_name)
-                out = replays_dir / f"{Path(safe_name).stem}__{digest}.SC2Replay"
-                out.write_bytes(data)
-                found.append(out)
-        return found
-
-    raise ReplayParserError(f"Unsupported upload type: {input_path.name}")
-
-
 def _install_imp_compat() -> None:
     """s2protocol still imports the removed `imp` module on newer Python versions.
 
@@ -279,26 +242,6 @@ def _is_animal_pid(pid: Any) -> bool:
         return int(pid) == ANIMAL_PLAYER_ID
     except Exception:
         return False
-
-
-def user_player_indices(player_list: list[Any], initdata: Any) -> dict[int, int]:
-    """Map game-event user IDs to replay.details player indices.
-
-    User IDs are lobby user slots, not player-list positions; AI players and
-    observers shift them. Falls back to identity when initData has no usable slots.
-    """
-    try:
-        slots = initdata["m_syncLobbyState"]["m_lobbyState"]["m_slots"]
-    except (KeyError, TypeError):
-        slots = []
-    mapping: dict[int, int] = {}
-    for index, player in enumerate(player_list):
-        slot = player.get("m_workingSetSlotId") if isinstance(player, dict) else None
-        if isinstance(slot, int) and 0 <= slot < len(slots):
-            user_id = slots[slot].get("m_userId") if isinstance(slots[slot], dict) else None
-            if isinstance(user_id, int):
-                mapping[user_id] = index
-    return mapping or {index: index for index in range(len(player_list))}
 
 
 def _pid_to_player(players: list[PlayerStats], pid: Any) -> PlayerStats | None:
@@ -542,98 +485,19 @@ def _apply_unit_category(player: PlayerStats, unit_type: str, amount: int = 1, *
 
 
 def _classify_player_role(player: PlayerStats) -> str:
-    total_combatish = max(1, player.cavalry_units + player.ranged_units + player.infantry_units + player.siege_units)
-    static_ratio = player.static_defense / max(1, player.units_born + player.structures_done)
-    cavalry_ratio = player.cavalry_units / total_combatish
-    ranged_ratio = player.ranged_units / total_combatish
-    infantry_ratio = player.infantry_units / total_combatish
-
-    if player.walls_gates >= 60 or player.static_defense >= 150 or (static_ratio >= 0.22 and player.static_defense >= 40):
-        return "Defensive anchor / wall player"
-    if player.cavalry_units >= 80 and cavalry_ratio >= 0.25:
-        return "Cavalry pressure / mobile carry"
-    if player.kills >= 800:
-        return "Main combat carry / pressure leader"
-    if player.ranged_units >= 150 and player.cavalry_units >= 100:
-        return "Mixed firepower + mobile pressure"
-    if player.ranged_units >= 150 and ranged_ratio >= 0.25:
-        return "Ranged firepower/support"
-    if player.infantry_units >= 250 and player.ranged_units >= 100:
-        return "Infantry + hand-cannon frontline"
-    if player.infantry_units >= 250 and infantry_ratio >= 0.40:
-        return "Infantry frontline/mass army"
-    if player.siege_units >= 40:
-        return "Mechanical-support player"
-    if player.units_born >= 300:
-        return "Mass-production support"
-    if player.animal_kills >= 30:
-        return "Map-control / animal-clear support"
-    return "Mixed/support"
+    return classify_role(player)
 
 
 def _team_style(team: TeamStats) -> str:
-    total = max(1, team.cavalry_units + team.ranged_units + team.infantry_units + team.siege_units)
-    if team.walls_gates >= 100 or (team.static_defense >= 350 and team.walls_gates >= 70):
-        return "Turtle / layered-defense team"
-    if team.cavalry_units / total >= 0.30:
-        return "Mobile cavalry-pressure team"
-    if team.ranged_units / total >= 0.35:
-        return "Ranged/firepower-heavy team"
-    if team.infantry_units / total >= 0.40 and team.ranged_units / total >= 0.20:
-        return "Infantry + firepower frontline team"
-    if team.infantry_units / total >= 0.45:
-        return "Infantry-frontline-heavy team"
-    return "Mixed-composition team"
-
-
-
-def _is_ffa_like_match(players: list[PlayerStats]) -> bool:
-    """Detect AoK Free For All / no-alliance displays from replay details.
-
-    Some AoK FFA displays encode every human under the same `m_teamId`, which
-    makes the old analyzer incorrectly merge the entire lobby into one team.
-    When 3+ players share one team id, treat the match as FFA and split each
-    player into their own analysis group. If SC2 already gives every player a
-    unique team id, we also label it as FFA-style for reporting.
-    """
-    real_players = [p for p in players if p.name and not p.name.startswith("Player 15")]
-    if len(real_players) < 3:
-        return False
-
-    team_ids = [p.team_id for p in real_players if p.team_id is not None]
-    if len(team_ids) != len(real_players):
-        return False
-
-    distinct = set(team_ids)
-    if len(distinct) <= 1:
-        return True
-    if len(distinct) == len(real_players):
-        return True
-    return False
+    return classify_team(team)
 
 
 def _normalize_match_mode(summary: ReplaySummary) -> None:
-    players = summary.players
-    if not players:
+    if not summary.players:
         return
-
-    if _is_ffa_like_match(players):
-        summary.match_mode = "Free-for-all"
-        # If the replay stores everyone under one team id, split players into
-        # individual analysis groups. This makes timelines, K/L, winner reads,
-        # and markdown reports FFA-safe while keeping the existing TeamStats path.
-        distinct = {p.team_id for p in players if p.team_id is not None}
-        if len(distinct) <= 1:
-            for idx, player in enumerate(players):
-                player.team_id = idx + 1
-        return
-
-    real_players = [p for p in players if p.name]
-    distinct = {p.team_id for p in real_players if p.team_id is not None}
-    if len(real_players) == 2 and len(distinct) == 2:
-        summary.match_mode = "Duel"
-    else:
-        summary.match_mode = "Team"
+    summary.match_mode, groups = normalize_match_groups(summary.players)
+    for player, group in zip(summary.players, groups):
+        player.team_id = group
 
 
 def _team_brief(team: TeamStats) -> str:
@@ -1176,10 +1040,8 @@ def _build_match_story(summary: ReplaySummary) -> None:
         takeaways.append("Use this replay as a role-coverage review: check who provides frontline, firepower, production, defense, and map control before judging only K/D.")
 
     winners = summary.winner_label()
-    if winners != "Unknown" and not winners.startswith("Not recorded"):
+    if winners != "Unknown":
         story.insert(0, f"Winning side detected as {winners}.")
-    elif summary.match_mode == "Free-for-all" and winners.startswith("Not recorded"):
-        story.insert(0, winners + ".")
 
     summary.key_findings = findings
     summary.match_story = story
@@ -1192,6 +1054,7 @@ def _build_match_story(summary: ReplaySummary) -> None:
 def parse_replay(path: Path) -> ReplaySummary:
     summary = ReplaySummary(source_path=path)
     summary.animal_stats = PlayerStats(name=ANIMAL_PLAYER_NAME, result="Neutral")
+    replay_handle = None
 
     try:
         mpyq, versions = _load_s2protocol()
@@ -1201,11 +1064,17 @@ def parse_replay(path: Path) -> ReplaySummary:
         return summary
 
     try:
-        archive = mpyq.MPQArchive(str(path))
+        replay_handle = path.open("rb")
+        archive = mpyq.MPQArchive(replay_handle)
         header_content = archive.header["user_data_header"]["content"]
         header = versions.latest().decode_replay_header(header_content)
         base_build = header["m_version"]["m_baseBuild"]
-        protocol = versions.build(base_build)
+        protocol, decoder_build = select_protocol(versions, base_build)
+        summary.decoder_build = str(decoder_build)
+        if decoder_build != base_build:
+            summary.warnings.append(
+                f"Compatibility decoder: replay base build {base_build} uses protocol {decoder_build}; "
+                "mapping verified against the local replay corpus.")
         summary.game_version = str(base_build)
 
         details = protocol.decode_replay_details(archive.read_file("replay.details"))
@@ -1263,7 +1132,10 @@ def parse_replay(path: Path) -> ReplaySummary:
                     elif event_name == "NNet.Game.SGameUserLeaveEvent":
                         players[uid].leave_time_seconds = _seconds_from_loops(loop)
         except Exception as exc:
-            summary.warnings.append(f"Could not decode game events: {exc}")
+            summary.game_events_complete = False
+            summary.warnings.append(f"Could not decode game events: {exc}. Command counts are partial; APM is unavailable.")
+        else:
+            summary.game_events_complete = True
 
         summary.raw_event_counts["game_events"] = game_event_count
         if max_loop:
@@ -1275,7 +1147,7 @@ def parse_replay(path: Path) -> ReplaySummary:
             player.camera_events = int(camera_counts.get(uid, 0))
             player.chat_messages = int(chat_counts.get(uid, 0))
             player.pings = int(ping_counts.get(uid, 0))
-            if summary.duration_seconds and summary.duration_seconds > 0:
+            if summary.duration_seconds and summary.duration_seconds > 0 and summary.game_events_complete:
                 player.apm = int(round(player.commands / (summary.duration_seconds / 60)))
 
         # Tracker events: units, buildings, losses, PvP kills, technology,
@@ -1487,6 +1359,18 @@ def parse_replay(path: Path) -> ReplaySummary:
                         continue
 
                     owner = _pid_to_player(players, owner_pid)
+                    if _is_animal_pid(killer_pid):
+                        animal = summary.animal_stats
+                        if animal:
+                            animal.kills += 1
+                            killer_unit_type = tag_type.get(_killer_tag(event), "UnknownAnimal")
+                            _increment(animal.unit_kill_counts, killer_unit_type)
+                        if owner:
+                            owner.deaths_to_animals += 1
+                            if owner.team_id is not None:
+                                team_timeline_state[int(owner.team_id)]["deaths_to_animals"] += 1
+                        continue
+
                     if owner:
                         owner.losses += 1
                         _increment(owner.unit_loss_counts, unit_type)
@@ -1500,18 +1384,6 @@ def parse_replay(path: Path) -> ReplaySummary:
                         if owner.team_id is not None:
                             team_timeline_state[int(owner.team_id)]["losses"] += 1
                         refresh_side_state(owner)
-
-                    if _is_animal_pid(killer_pid):
-                        animal = summary.animal_stats
-                        if animal:
-                            animal.kills += 1
-                            killer_unit_type = tag_type.get(_killer_tag(event), "UnknownAnimal")
-                            _increment(animal.unit_kill_counts, killer_unit_type)
-                        if owner:
-                            owner.deaths_to_animals += 1
-                            if owner.team_id is not None:
-                                team_timeline_state[int(owner.team_id)]["deaths_to_animals"] += 1
-                        continue
 
                     killer = _pid_to_player(players, killer_pid)
                     # Avoid counting suicides/environment/no-player/animal kills as PvP kills.
@@ -1554,6 +1426,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                         refresh_side_state(player)
         except Exception as exc:
             summary.warnings.append(f"Could not decode tracker events: {exc}")
+            raise
 
         summary.raw_event_counts["tracker_events"] = tracker_count
         summary.raw_event_counts["player_stats_events"] = player_stats_event_count
@@ -1608,3 +1481,6 @@ def parse_replay(path: Path) -> ReplaySummary:
         summary.warnings.append(f"Replay parse failed: {type(exc).__name__}: {exc}")
         summary.map_name = "Unknown - parse failed"
         return summary
+    finally:
+        if replay_handle is not None:
+            replay_handle.close()

@@ -44,3 +44,6 @@ strategy_mining/output/*
 Thumbs.db
 .vscode/
 .idea/
+
+# Local corpus audit outputs
+analysis_outputs/

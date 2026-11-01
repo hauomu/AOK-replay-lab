@@ -210,10 +210,12 @@ class TeamStats:
 @dataclass
 class ReplaySummary:
     source_path: Path
-    match_mode: str = "Team"
+    match_mode: str = "Unknown"
     map_name: str | None = None
     duration_seconds: int | None = None
     game_version: str | None = None
+    decoder_build: str | None = field(default=None, kw_only=True)
+    game_events_complete: bool | None = field(default=None, kw_only=True)
     players: list[PlayerStats] = field(default_factory=list)
     teams: list[TeamStats] = field(default_factory=list)
     animal_stats: PlayerStats | None = None
@@ -264,28 +266,30 @@ class ReplaySummary:
             winners = [side_name(t) for t in self.teams if t.result == "Win"]
             if winners:
                 return ", ".join(winners)
-            if self.match_mode == "Free-for-all":
-                leader = max(
-                    self.teams,
-                    key=lambda t: (
-                        t.kills - t.losses,
-                        t.kill_loss_ratio() or 0,
-                        t.tech_score,
-                        t.resource_gathered_estimate.get("gold", 0)
-                        + t.resource_gathered_estimate.get("wood", 0)
-                        + t.resource_gathered_estimate.get("iron", 0),
-                        t.units_born,
-                        t.commands,
-                    ),
-                    default=None,
-                )
-                if leader is not None:
-                    return f"Not recorded; likely leader: {side_name(leader)}"
 
         winners = sorted({p.team_id for p in self.players if p.result == "Win" and p.team_id is not None})
         if winners:
             return ", ".join(f"Team {team}" for team in winners)
         return "Unknown"
+
+    def likely_leader_label(self) -> str | None:
+        if self.match_mode != "Free-for-all" or self.winner_label() != "Unknown":
+            return None
+        leader = max(
+            self.teams,
+            key=lambda t: (
+                t.kills - t.losses,
+                t.kill_loss_ratio() or 0,
+                t.tech_score,
+                t.resource_gathered_estimate.get("gold", 0)
+                + t.resource_gathered_estimate.get("wood", 0)
+                + t.resource_gathered_estimate.get("iron", 0),
+                t.units_born,
+                t.commands,
+            ),
+            default=None,
+        )
+        return (leader.label or f"Team {leader.team_id}") if leader else None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -295,6 +299,11 @@ class ReplaySummary:
             "duration_seconds": self.duration_seconds,
             "duration_label": self.duration_label(),
             "game_version": self.game_version,
+            "decoder_build": self.decoder_build,
+            "game_events_complete": self.game_events_complete,
+            "recorded_winner": self.winner_label(),
+            "winner_source": "replay" if self.winner_label() != "Unknown" else "not_recorded",
+            "inferred_statistical_leader": self.likely_leader_label(),
             "players": [p.__dict__ for p in self.players],
             "teams": [t.__dict__ for t in self.teams],
             "animal_stats": self.animal_stats.__dict__ if self.animal_stats else None,

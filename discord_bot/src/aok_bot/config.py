@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+from .replay_inputs import ReplayLimits
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,15 @@ class Settings:
     sc2arcade_map_id: int
     database_path: Path
     data_dir: Path
+    input_limits: ReplayLimits = ReplayLimits()
+    max_active_jobs: int = 2
+    download_timeout: float = 60
+
+    def __post_init__(self):
+        if (type(self.max_active_jobs) is not int or self.max_active_jobs < 1
+                or type(self.download_timeout) not in (int, float)
+                or not 0 < self.download_timeout < math.inf):
+            raise ValueError("Invalid bot limits")
 
     @property
     def uploads_dir(self) -> Path:
