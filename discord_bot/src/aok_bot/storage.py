@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from .models import ReplaySummary
@@ -52,6 +53,18 @@ CREATE INDEX IF NOT EXISTS idx_replay_players_name ON replay_players(name);
 """
 
 
+# Aggregates count only replays that parsed fully; partial counters from failed parses are unreliable.
+SUCCESSFUL_PLAYERS = "replay_players p JOIN replays r ON r.id = p.replay_id AND r.parser_ok = 1"
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return round(numerator / denominator, 3) if denominator else None
+
+
+def _escape_like(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class Storage:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -69,7 +82,7 @@ class Storage:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def _init_db(self) -> None:
-        with self.connect() as conn:
+        with closing(self.connect()) as conn, conn:
             conn.executescript(SCHEMA)
             # Lightweight migrations for users with v0.1/v0.2 local DBs.
             self._ensure_column(conn, "replay_players", "animal_kills", "INTEGER NOT NULL DEFAULT 0")
@@ -87,7 +100,7 @@ class Storage:
             self._ensure_column(conn, "replay_players", "iron_gathered", "INTEGER NOT NULL DEFAULT 0")
 
     def save_replay(self, summary: ReplaySummary) -> int:
-        with self.connect() as conn:
+        with closing(self.connect()) as conn, conn:
             raw_json = json.dumps(summary.to_dict(), ensure_ascii=False)
             warnings_json = json.dumps(summary.warnings, ensure_ascii=False)
 
@@ -161,19 +174,26 @@ class Storage:
             return replay_id
 
     def player_profile(self, name: str) -> dict:
-        like = f"%{name}%"
-        with self.connect() as conn:
+        """Profile one player. An exact (case-insensitive) name wins; a partial
+        match is used only when it identifies a single player, so different
+        players sharing a substring are never merged."""
+        with closing(self.connect()) as conn, conn:
+            names = [r[0] for r in conn.execute(
+                f"SELECT DISTINCT p.name FROM {SUCCESSFUL_PLAYERS} WHERE p.name = ? COLLATE NOCASE",
+                (name,),
+            )]
+            if not names:
+                names = [r[0] for r in conn.execute(
+                    f"SELECT DISTINCT p.name FROM {SUCCESSFUL_PLAYERS} WHERE p.name LIKE ? ESCAPE '\\' "
+                    "ORDER BY p.name LIMIT 11",
+                    (f"%{_escape_like(name)}%",),
+                )]
+            if len(names) != 1:
+                return {"name": name, "games": 0, "matches": names}
             rows = conn.execute(
-                """
-                SELECT * FROM replay_players
-                WHERE name LIKE ?
-                ORDER BY id DESC
-                """,
-                (like,),
+                f"SELECT p.* FROM {SUCCESSFUL_PLAYERS} WHERE p.name = ? ORDER BY p.id DESC",
+                (names[0],),
             ).fetchall()
-
-        if not rows:
-            return {"name": name, "games": 0}
 
         total_kills = sum(int(r["kills"] or 0) for r in rows)
         total_losses = sum(int(r["losses"] or 0) for r in rows)
@@ -200,10 +220,10 @@ class Storage:
             "games": len(rows),
             "kills": total_kills,
             "losses": total_losses,
-            "kill_loss_ratio": round(total_kills / total_losses, 3) if total_losses else None,
+            "kill_loss_ratio": _ratio(total_kills, total_losses),
             "animal_kills": total_animal_kills,
             "deaths_to_animals": total_deaths_to_animals,
-            "animal_kill_loss_ratio": round(total_animal_kills / total_deaths_to_animals, 3) if total_deaths_to_animals else None,
+            "animal_kill_loss_ratio": _ratio(total_animal_kills, total_deaths_to_animals),
             "units_born": total_units,
             "mechanical_units": total_mechanical_units,
             "mechanical_kills": total_mechanical_kills,
@@ -218,22 +238,21 @@ class Storage:
         }
 
     def leaderboard(self, limit: int = 10) -> list[dict]:
-        with self.connect() as conn:
+        with closing(self.connect()) as conn, conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT
-                    name,
+                    p.name AS name,
                     COUNT(*) AS games,
-                    SUM(kills) AS kills,
-                    SUM(losses) AS losses,
-                    SUM(animal_kills) AS animal_kills,
-                    SUM(deaths_to_animals) AS deaths_to_animals,
-                    SUM(units_born) AS units_born,
-                    SUM(commands) AS commands,
-                    AVG(apm) AS avg_apm
-                FROM replay_players
-                GROUP BY name
-                HAVING games > 0
+                    TOTAL(p.kills) AS kills,
+                    TOTAL(p.losses) AS losses,
+                    TOTAL(p.animal_kills) AS animal_kills,
+                    TOTAL(p.deaths_to_animals) AS deaths_to_animals,
+                    TOTAL(p.units_born) AS units_born,
+                    TOTAL(p.commands) AS commands,
+                    AVG(p.apm) AS avg_apm
+                FROM {SUCCESSFUL_PLAYERS}
+                GROUP BY p.name
                 ORDER BY kills DESC, animal_kills DESC, games DESC
                 LIMIT ?
                 """,
@@ -251,10 +270,10 @@ class Storage:
                     "games": int(r["games"] or 0),
                     "kills": kills,
                     "losses": losses,
-                    "klr": round(kills / losses, 3) if losses else None,
+                    "klr": _ratio(kills, losses),
                     "animal_kills": animal_kills,
                     "deaths_to_animals": deaths_to_animals,
-                    "animal_klr": round(animal_kills / deaths_to_animals, 3) if deaths_to_animals else None,
+                    "animal_klr": _ratio(animal_kills, deaths_to_animals),
                     "units_born": int(r["units_born"] or 0),
                     "commands": int(r["commands"] or 0),
                     "avg_apm": round(float(r["avg_apm"]), 1) if r["avg_apm"] is not None else None,

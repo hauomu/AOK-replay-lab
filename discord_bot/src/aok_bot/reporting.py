@@ -1012,7 +1012,21 @@ def make_match_embed(summary: ReplaySummary) -> discord.Embed:
     return embed
 
 
+def _failed_report(summary: ReplaySummary) -> str:
+    """Partial counters from a failed parse are unreliable, so they are never rendered."""
+    lines = ["# AoK Replay Analysis", "", _markdown_table(["Field", "Value"], [
+        ["File", f"`{summary.source_path.name}`"],
+        ["Map", summary.map_name or "Unknown"],
+        ["Parser OK", False],
+    ]), "", "Replay analysis did not complete, so no statistics are reported for this file.", ""]
+    if summary.warnings:
+        lines += ["## Warnings", ""] + [f"- {w}" for w in summary.warnings]
+    return "\n".join(lines).strip() + "\n"
+
+
 def markdown_report(summary: ReplaySummary) -> str:
+    if not summary.parser_ok:
+        return _failed_report(summary)
     tables = _build_report_tables(summary)
 
     if Environment is not None:

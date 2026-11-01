@@ -21,6 +21,8 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
+MAX_ATTACHMENTS = 10  # Discord's per-message file limit.
+
 
 def guild_object() -> discord.Object | None:
     if settings.guild_id is None:
@@ -120,16 +122,25 @@ async def aok_analyze(interaction: discord.Interaction, replay: discord.Attachme
         f"Processed **{len(summaries)}** replay(s). "
         f"Full parser OK for **{ok_count}**. Showing first replay snapshot below."
     )
-    # For many reports, avoid attaching dozens of files to Discord. Attach only first report.
-    await interaction.followup.send(message, embed=embed, file=discord.File(report_paths[0]))
+    if len(report_paths) > MAX_ATTACHMENTS:
+        message += f" Attached the first {MAX_ATTACHMENTS} of {len(report_paths)} reports."
+    files = [discord.File(path) for path in report_paths[:MAX_ATTACHMENTS]]
+    await interaction.followup.send(message, embed=embed, files=files)
 
 
 @tree.command(name="aok_player", description="Show local profile stats for a player from uploaded replays.")
 @app_commands.describe(name="Player name or partial name")
 async def aok_player(interaction: discord.Interaction, name: str):
-    profile = storage.player_profile(name)
+    profile = await asyncio.to_thread(storage.player_profile, name)
     if profile["games"] == 0:
-        await interaction.response.send_message(f"No local replay stats found for `{name}` yet.")
+        matches = profile.get("matches") or []
+        if matches:
+            shown = ", ".join(f"`{m}`" for m in matches[:10])
+            await interaction.response.send_message(
+                f"`{name}` matches several players: {shown}. Use the full name."
+            )
+        else:
+            await interaction.response.send_message(f"No local replay stats found for `{name}` yet.")
         return
 
     lines = [
@@ -149,7 +160,7 @@ async def aok_player(interaction: discord.Interaction, name: str):
 
 @tree.command(name="aok_leaderboard", description="Show local leaderboard from uploaded replays.")
 async def aok_leaderboard(interaction: discord.Interaction):
-    rows = storage.leaderboard(limit=10)
+    rows = await asyncio.to_thread(storage.leaderboard, limit=10)
     if not rows:
         await interaction.response.send_message("No local replay stats yet. Upload replays with `/aok_analyze`.")
         return

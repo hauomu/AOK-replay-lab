@@ -281,6 +281,26 @@ def _is_animal_pid(pid: Any) -> bool:
         return False
 
 
+def user_player_indices(player_list: list[Any], initdata: Any) -> dict[int, int]:
+    """Map game-event user IDs to replay.details player indices.
+
+    User IDs are lobby user slots, not player-list positions; AI players and
+    observers shift them. Falls back to identity when initData has no usable slots.
+    """
+    try:
+        slots = initdata["m_syncLobbyState"]["m_lobbyState"]["m_slots"]
+    except (KeyError, TypeError):
+        slots = []
+    mapping: dict[int, int] = {}
+    for index, player in enumerate(player_list):
+        slot = player.get("m_workingSetSlotId") if isinstance(player, dict) else None
+        if isinstance(slot, int) and 0 <= slot < len(slots):
+            user_id = slots[slot].get("m_userId") if isinstance(slots[slot], dict) else None
+            if isinstance(user_id, int):
+                mapping[user_id] = index
+    return mapping or {index: index for index in range(len(player_list))}
+
+
 def _pid_to_player(players: list[PlayerStats], pid: Any) -> PlayerStats | None:
     if pid is None or _is_animal_pid(pid):
         return None
@@ -872,7 +892,7 @@ def _team_strength_bits(team: TeamStats, others: list[TeamStats]) -> list[str]:
     if ratio > other_best_ratio + 0.10:
         bits.append("better trade conversion")
     if team.units_born >= other_max_units * 1.10:
-        bits.append("larger production/remax footprint")
+        bits.append("larger production footprint")
     if team.commands >= other_max_commands * 1.10:
         bits.append("higher visible activity")
     if team.static_defense >= max(o.static_defense for o in others) * 1.25 and team.static_defense >= 30:
@@ -921,8 +941,10 @@ def _build_turning_points(summary: ReplaySummary) -> list[str]:
     if len(summary.teams) < 2 or len(summary.timeline_snapshots) < 2:
         return []
     winner = next((t for t in summary.teams if t.result == "Win"), None)
+    subject = "recorded winner"
     if winner is None:
         winner = max(summary.teams, key=lambda t: (t.kill_loss_ratio() or 0, t.kills - t.losses))
+        subject = "inferred statistical leader, not a recorded winner"
     opponents = [t for t in summary.teams if t.team_id != winner.team_id]
     if not opponents:
         return []
@@ -948,9 +970,9 @@ def _build_turning_points(summary: ReplaySummary) -> list[str]:
     if best and best[0] > 20:
         return [
             f"Largest detected fight swing is around {_time_label(best[1])}–{_time_label(best[2])}, "
-            f"where {_team_display(winner, match_mode=summary.match_mode)} improved its relative kill/loss position by about {best[0]} units."
+            f"where {_team_display(winner, match_mode=summary.match_mode)} ({subject}) improved its relative kill/loss position by about {best[0]} units."
         ]
-    return ["No single clean swing window was detected; the result looks more like gradual conversion and attrition."]
+    return ["No timeline window shows a relative kill/loss swing above 20 units."]
 
 
 def _build_match_story(summary: ReplaySummary) -> None:
@@ -991,17 +1013,13 @@ def _build_match_story(summary: ReplaySummary) -> None:
                     "The report compares individual sides instead of team aggregates."
                 )
             elif opponents:
+                # Recorded outcome plus measured sizes only; replay counters do not establish why a side won.
                 biggest_opp = max(opponents, key=lambda t: len(t.players))
-                if len(winner.players) < len(biggest_opp.players):
-                    summary.verdict = (
-                        f"{_team_display(winner, match_mode=summary.match_mode)} won despite having fewer allied players; the replay points to better fight conversion, "
-                        "activity, and replacement tempo rather than a simple army-size advantage."
-                    )
-                else:
-                    summary.verdict = (
-                        f"{_team_display(winner, match_mode=summary.match_mode)} won through a {winner.style_label or 'mixed'} profile, with the strongest evidence coming from "
-                        "fight conversion, production/remax, and role coverage."
-                    )
+                summary.verdict = (
+                    f"Recorded winner: {_team_display(winner, match_mode=summary.match_mode)} ({len(winner.players)} player(s) versus "
+                    f"{len(biggest_opp.players)} on the largest opposing side; heuristic style label: "
+                    f"{winner.style_label or 'mixed'}). The replay records the outcome, not its causes."
+                )
             else:
                 summary.verdict = f"{_team_display(winner, match_mode=summary.match_mode)} is detected as the winning side."
         else:
@@ -1138,15 +1156,15 @@ def _build_match_story(summary: ReplaySummary) -> None:
                 opp = max(opps, key=lambda t: len(t.players))
                 if len(winner.players) < len(opp.players):
                     takeaways.append(
-                        "A smaller team can still win if it survives the early pressure, has enough production to replace losses, and takes the cleaner decisive fights."
+                        "Review question: the recorded winner had fewer players; which fights and replacement decisions offset the numbers gap?"
                     )
                 elif (winner.kill_loss_ratio() or 0) > (opp.kill_loss_ratio() or 0):
                     takeaways.append(
-                        "Do not judge a push only by army count; replacement tempo and trade conversion are often more predictive than raw numbers."
+                        "Review question: the recorded winner also had the better PvP K/L; which engagements produced that trade difference?"
                     )
     if animal and animal.kills >= 20:
         takeaways.append(
-            "Animals are not just background map decoration in this replay: Player 15 caused enough deaths that pathing, scouting, and animal clearing should be part of the guide read."
+            f"Player 15 animals killed {animal.kills} player units; review whether pathing, scouting and animal clearing exposed units."
         )
     if summary.teams and len(summary.teams) >= 2:
         tech_ranked = sorted(summary.teams, key=lambda t: (t.tech_score, _resource_total(t.resource_gathered_estimate)), reverse=True)
@@ -1192,9 +1210,10 @@ def parse_replay(path: Path) -> ReplaySummary:
 
         details = protocol.decode_replay_details(archive.read_file("replay.details"))
         try:
-            protocol.decode_replay_initdata(archive.read_file("replay.initData"))
+            initdata = protocol.decode_replay_initdata(archive.read_file("replay.initData"))
         except Exception:
-            pass
+            initdata = None
+        user_index = user_player_indices(details.get("m_playerList", []), initdata)
 
         summary.map_name = _safe_decode_string(details.get("m_title"))
         if not summary.map_name:
@@ -1228,13 +1247,9 @@ def parse_replay(path: Path) -> ReplaySummary:
                 game_event_count += 1
                 loop = int(event.get("_gameloop", 0) or 0)
                 max_loop = max(max_loop, loop)
-                uid_raw = event.get("_userid", {}).get("m_userId")
-                try:
-                    uid = int(uid_raw) if uid_raw is not None else None
-                except Exception:
-                    uid = None
+                uid = user_index.get(event.get("_userid", {}).get("m_userId"))
                 event_name = event.get("_event")
-                if uid is not None and 0 <= uid < len(players):
+                if uid is not None:
                     if event_name == "NNet.Game.SCmdEvent":
                         command_counts[uid] += 1
                     elif event_name == "NNet.Game.SControlGroupUpdateEvent":
