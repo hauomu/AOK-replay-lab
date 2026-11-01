@@ -3,16 +3,16 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "discord_bot/src"), str(ROOT / "strategy_mining/src")]
-from aok_bot import bot
+sys.path[:0] = [str(ROOT / "discord_bot/src"), str(ROOT / "discord_bot/external/s2protocol")]
+from aok_bot import bot, replay_inputs as inputs
+from aok_bot.match_rules import user_player_indices
 from aok_bot.models import PlayerStats, ReplaySummary
-from aok_bot.replay_parser import _build_match_story, _build_team_stats, user_player_indices
+from aok_bot.replay_parser import _build_match_story, _build_team_stats
 from aok_bot.reporting import markdown_report
 from aok_bot.storage import Storage
-from aok_ml import replay_events
 
 
 def initdata(*user_ids):
@@ -21,11 +21,10 @@ def initdata(*user_ids):
 
 class UserMappingTests(unittest.TestCase):
     def test_ai_slots_shift_user_ids(self):
-        # Corpus shape: players 2 and 5 are AI, so user IDs skip them.
-        players = [{"m_workingSetSlotId": slot} for slot in range(7)]
-        expected = {0: 0, 1: 2, 2: 3, 3: 5, 4: 6}
-        self.assertEqual(user_player_indices(players, initdata(0, None, 1, 2, None, 3, 4)), expected)
-        self.assertEqual(replay_events.user_player_indices(players, initdata(0, None, 1, 2, None, 3, 4)), expected)
+        # Corpus shape: players 1 and 4 are AI, so user IDs skip them.
+        players = [{"m_workingSetSlotId": slot} for slot in (0, 1, 2, 3, 4, 5, 6)]
+        mapping = user_player_indices(players, initdata(0, None, 1, 2, None, 3, 4))
+        self.assertEqual(mapping, {0: 0, 1: 2, 2: 3, 3: 5, 4: 6})
 
     def test_missing_initdata_keeps_identity(self):
         players = [{"m_workingSetSlotId": 0}, {"m_workingSetSlotId": 1}]
@@ -65,10 +64,9 @@ class ReportSemanticsTests(unittest.TestCase):
         summary = ReplaySummary(Path("f.SC2Replay"), match_mode="Team", warnings=["Replay analysis failed."],
                                 players=[PlayerStats("Ada", team_id=1, kills=7, units_born=1)])
         _build_team_stats(summary)
-        report = markdown_report(summary)
+        report = markdown_report(summary, "coaching")
         self.assertIn("no statistics are reported", report)
-        self.assertIn("Replay analysis failed.", report)
-        for absent in ("Ada", "7/0", "Duration"):
+        for absent in ("Player combat", "Side combat", "Ada", "7/0"):
             self.assertNotIn(absent, report)
 
     def test_verdict_states_outcome_without_causes(self):
@@ -77,7 +75,7 @@ class ReportSemanticsTests(unittest.TestCase):
             PlayerStats("B", team_id=2, result="Loss")])
         _build_team_stats(summary)
         _build_match_story(summary)
-        self.assertIn("Recorded winner:", summary.verdict)
+        self.assertIn("Recorded winner: Team 1", summary.verdict)
         for claim in ("won through", "strongest evidence", "fight conversion", "remax", "role coverage"):
             self.assertNotIn(claim, markdown_report(summary))
 
@@ -85,25 +83,33 @@ class ReportSemanticsTests(unittest.TestCase):
 class MultiReportTests(unittest.IsolatedAsyncioTestCase):
     async def test_every_report_is_attached_up_to_discord_limit(self):
         with tempfile.TemporaryDirectory() as directory:
+            upload = Path(directory) / "upload.zip"
+            upload.write_bytes(b"x")
             reports = []
             for i in range(12):
                 reports.append(Path(directory) / f"r{i}.md")
                 reports[-1].write_text("report")
             summary = ReplaySummary(Path("x"), parser_ok=True)
+            async def thread(function, *args):
+                return [Path(str(i)) for i in range(12)] if function is inputs.extract_replay_paths else summary
+            settings = SimpleNamespace(replays_dir=Path(directory), reports_dir=Path(directory),
+                                       input_limits=inputs.DEFAULT_LIMITS)
             interaction = SimpleNamespace(response=SimpleNamespace(defer=AsyncMock()),
                                           followup=SimpleNamespace(send=AsyncMock()))
-            with patch.object(bot, "save_attachment", AsyncMock(return_value=Path(directory) / "u.zip")), \
-                 patch.object(bot, "extract_replay_paths", return_value=[Path(str(i)) for i in range(12)]), \
-                 patch.object(bot, "parse_replay", return_value=summary), \
+            with patch.object(bot, "settings", settings), \
                  patch.object(bot, "storage", SimpleNamespace(save_replay=lambda s: None)), \
-                 patch.object(bot, "save_markdown_report", side_effect=reports), \
-                 patch.object(bot, "make_match_embed", MagicMock()):
-                await bot.aok_analyze.callback(interaction, SimpleNamespace(filename="u.zip"))
+                 patch.object(bot, "save_attachment", AsyncMock(return_value=upload)), \
+                 patch.object(bot, "owned_thread", side_effect=thread), \
+                 patch.object(bot, "save_markdown_report", side_effect=reports):
+                await bot._analyze_job(interaction, None, "stats")
             call = interaction.followup.send.call_args
-            for file in call.kwargs["files"]:
-                file.close()
             self.assertEqual(len(call.kwargs["files"]), 10)
-            self.assertIn("first 10 of 12 reports", call.args[0])
+            self.assertIn("first 10 reports", call.args[0])
+
+    def test_public_warnings_are_fixed_text(self):
+        self.assertEqual(bot._public_warning("Could not decode game events: C:/private"),
+                         "Command counts are partial; APM is unavailable.")
+        self.assertEqual(bot._public_warning("anything /secret"), "Some replay data could not be analyzed reliably.")
 
 
 if __name__ == "__main__":

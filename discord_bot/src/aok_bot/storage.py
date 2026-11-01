@@ -52,6 +52,19 @@ CREATE TABLE IF NOT EXISTS replay_players (
 CREATE INDEX IF NOT EXISTS idx_replay_players_name ON replay_players(name);
 """
 
+# Failed parses keep their diagnostic rows but never feed public profiles or leaderboards.
+SUCCESSFUL_PLAYERS = """
+    replay_players p JOIN replays r ON r.id = p.replay_id AND r.parser_ok = 1
+"""
+
+
+def _ratio(numerator: int, denominator: int) -> float | None:
+    return round(numerator / denominator, 3) if denominator else None
+
+
+def _escape_like(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 # Aggregates count only replays that parsed fully; partial counters from failed parses are unreliable.
 SUCCESSFUL_PLAYERS = "replay_players p JOIN replays r ON r.id = p.replay_id AND r.parser_ok = 1"
@@ -101,18 +114,20 @@ class Storage:
 
     def save_replay(self, summary: ReplaySummary) -> int:
         with closing(self.connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
             raw_json = json.dumps(summary.to_dict(), ensure_ascii=False)
             warnings_json = json.dumps(summary.warnings, ensure_ascii=False)
 
             # Re-analyzing the same replay should replace old player rows, not duplicate them.
             old_row = conn.execute(
-                "SELECT id FROM replays WHERE source_path = ?",
+                "SELECT id, parser_ok FROM replays WHERE source_path = ?",
                 (str(summary.source_path),),
             ).fetchone()
+            if old_row is not None and old_row["parser_ok"] and not summary.parser_ok:
+                return int(old_row["id"])
             if old_row is not None:
-                old_replay_id = int(old_row["id"] if "id" in old_row.keys() else old_row[0])
-                conn.execute("DELETE FROM replay_players WHERE replay_id = ?", (old_replay_id,))
-                conn.execute("DELETE FROM replays WHERE id = ?", (old_replay_id,))
+                conn.execute("DELETE FROM replay_players WHERE replay_id = ?", (old_row["id"],))
+                conn.execute("DELETE FROM replays WHERE id = ?", (old_row["id"],))
 
             conn.execute(
                 """
@@ -209,14 +224,13 @@ class Storage:
         total_iron = sum(int(r["iron_gathered"] or 0) for r in rows)
         total_commands = sum(int(r["commands"] or 0) for r in rows)
         apms = [int(r["apm"]) for r in rows if r["apm"] is not None]
-
-        results = {}
+        results: dict[str, int] = {}
         for r in rows:
             key = r["result"] or "unknown"
             results[key] = results.get(key, 0) + 1
 
         return {
-            "name": rows[0]["name"],
+            "name": names[0],
             "games": len(rows),
             "kills": total_kills,
             "losses": total_losses,
@@ -260,22 +274,20 @@ class Storage:
             ).fetchall()
         result = []
         for r in rows:
-            losses = int(r["losses"] or 0)
-            kills = int(r["kills"] or 0)
-            deaths_to_animals = int(r["deaths_to_animals"] or 0)
-            animal_kills = int(r["animal_kills"] or 0)
+            kills, losses = int(r["kills"]), int(r["losses"])
+            animal_kills, deaths_to_animals = int(r["animal_kills"]), int(r["deaths_to_animals"])
             result.append(
                 {
                     "name": r["name"],
-                    "games": int(r["games"] or 0),
+                    "games": int(r["games"]),
                     "kills": kills,
                     "losses": losses,
                     "klr": _ratio(kills, losses),
                     "animal_kills": animal_kills,
                     "deaths_to_animals": deaths_to_animals,
                     "animal_klr": _ratio(animal_kills, deaths_to_animals),
-                    "units_born": int(r["units_born"] or 0),
-                    "commands": int(r["commands"] or 0),
+                    "units_born": int(r["units_born"]),
+                    "commands": int(r["commands"]),
                     "avg_apm": round(float(r["avg_apm"]), 1) if r["avg_apm"] is not None else None,
                 }
             )

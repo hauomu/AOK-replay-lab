@@ -6,6 +6,7 @@ from typing import Any
 import discord
 
 from .models import PlayerStats, ReplaySummary, TeamStats
+from .analysis_hooks import analyze
 
 try:  # v0.6: Jinja2 gives us a cleaner, template-driven Markdown report layout.
     from jinja2 import Environment
@@ -295,17 +296,6 @@ def _sort_players_for_report(summary: ReplaySummary) -> list[PlayerStats]:
             reverse=True,
         )
     return sorted(summary.players, key=lambda p: (p.team_id if p.team_id is not None else 99, -p.kills, p.name.lower()))
-
-
-def _side_roster_lines(summary: ReplaySummary) -> list[str]:
-    """Human-readable side labels for Discord embeds."""
-    if not summary.teams:
-        return []
-    if summary.match_mode == "Free-for-all":
-        return [f"{_team_label(t)} = FFA side" for t in _sort_teams_for_report(summary)]
-    if summary.match_mode == "Duel":
-        return [f"{_team_label(t)} = duel side" for t in _sort_teams_for_report(summary)]
-    return [f"{_team_label(t)} = {', '.join(t.players) if t.players else 'unknown players'}" for t in _sort_teams_for_report(summary)]
 
 
 def _player_group_label(summary: ReplaySummary, team: TeamStats | None, players: list[PlayerStats]) -> str:
@@ -620,32 +610,6 @@ def _build_report_tables(summary: ReplaySummary) -> dict[str, list[list[Any]]]:
         for p in players
     ]
 
-    player_combat_rows = [
-        [
-            p.name,
-            f"{p.kills}/{p.losses} ({_ratio(p.kills, p.losses)})",
-            f"{p.animal_kills}/{p.deaths_to_animals} ({_ratio(p.animal_kills, p.deaths_to_animals)})",
-            p.units_born,
-            p.structures_done,
-            p.commands,
-            p.apm if p.apm is not None else "",
-        ]
-        for p in players
-    ]
-
-    player_army_rows = [
-        [
-            p.name,
-            p.static_defense,
-            p.cavalry_units,
-            p.ranged_units,
-            p.infantry_units,
-            p.mechanical_units,
-            _top_items(p.top_units(4)),
-        ]
-        for p in players
-    ]
-
     animal_rows = [
         [
             p.name,
@@ -658,13 +622,6 @@ def _build_report_tables(summary: ReplaySummary) -> dict[str, list[list[Any]]]:
         if p.animal_kills or p.deaths_to_animals
     ]
 
-    # v0.8: timeline rows are sorted by side first, then time, so progression is easier to scan.
-    team_labels = {str(t.team_id): _timeline_group_label(summary, t) for t in summary.teams}
-    timeline_rows: list[list[Any]] = []
-    for group in _build_timeline_table_groups(summary):
-        for row in group["rows"]:
-            timeline_rows.append([row[0], group["label"], row[1], row[2], row[3]])
-
     raw_event_rows = [[key, value] for key, value in summary.raw_event_counts.items()]
 
     return {
@@ -674,10 +631,7 @@ def _build_report_tables(summary: ReplaySummary) -> dict[str, list[list[Any]]]:
         "side_tech": side_tech_rows,
         "side_resources": side_resource_rows,
         "player_overview": player_overview_rows,
-        "player_combat": player_combat_rows,
-        "player_army": player_army_rows,
         "animal_rows": animal_rows,
-        "timeline_rows": timeline_rows,
         "raw_event_rows": raw_event_rows,
     }
 
@@ -690,7 +644,7 @@ REPORT_TEMPLATE = r"""# AoK Replay Analysis
 | Map | {{ (summary.map_name or 'Unknown') | md }} |
 | Duration | {{ summary.duration_label() | md }} |
 | Match mode | {{ summary.match_mode | md }} |
-| Winning side | {{ summary.winner_label() | md }} |
+| Winning side | {{ summary.winner_label() | md }}{% if summary.likely_leader_label() %} (inferred statistical leader: {{ summary.likely_leader_label() | md }}){% endif %} |
 | Game version/build | {{ (summary.game_version or 'Unknown') | md }} |
 | Parser OK | {{ summary.parser_ok }} |
 | Report format | Jinja2 compact table layout |
@@ -934,6 +888,17 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 """
 
 
+def _side_roster_lines(summary: ReplaySummary) -> list[str]:
+    """Human-readable side labels for Discord embeds."""
+    if not summary.teams:
+        return []
+    if summary.match_mode == "Free-for-all":
+        return [f"{_team_label(t)} = FFA side" for t in _sort_teams_for_report(summary)]
+    if summary.match_mode == "Duel":
+        return [f"{_team_label(t)} = duel side" for t in _sort_teams_for_report(summary)]
+    return [f"{_team_label(t)} = {', '.join(t.players) if t.players else 'unknown players'}" for t in _sort_teams_for_report(summary)]
+
+
 def make_match_embed(summary: ReplaySummary) -> discord.Embed:
     title = summary.map_name or "AoK Replay Analysis"
     colour = discord.Colour.green() if summary.parser_ok else discord.Colour.orange()
@@ -941,7 +906,9 @@ def make_match_embed(summary: ReplaySummary) -> discord.Embed:
     embed.add_field(name="Duration", value=summary.duration_label(), inline=True)
     embed.add_field(name="Players", value=str(len(summary.players)) if summary.players else "unknown", inline=True)
     embed.add_field(name="Mode", value=summary.match_mode, inline=True)
-    embed.add_field(name="Winner", value=summary.winner_label(), inline=True)
+    leader = summary.likely_leader_label()
+    winner = f"Not recorded; likely leader: {leader}" if leader else summary.winner_label()
+    embed.add_field(name="Winner", value=winner, inline=True)
     embed.add_field(name="Parser", value="OK" if summary.parser_ok else "limited", inline=True)
 
     side_rosters = _side_roster_lines(summary)
@@ -1012,21 +979,43 @@ def make_match_embed(summary: ReplaySummary) -> discord.Embed:
     return embed
 
 
-def _failed_report(summary: ReplaySummary) -> str:
+def _analysis_markdown(summary: ReplaySummary, mode: str) -> str:
+    result = analyze(summary, mode)
+    lines = [f"## {mode.title()} analysis", ""]
+    completeness = {True: "complete", False: "partial", None: "unverified"}[summary.game_events_complete]
+    lines.extend([f"- Replay base build: {summary.game_version or 'unknown'}; decoder build: {summary.decoder_build or 'unverified'}.",
+                  f"- Command event stream: {completeness}.", ""])
+    if mode != "stats" and summary.likely_leader_label():
+        lines.extend([f"**Statistical leader (inferred, not a confirmed winner):** {summary.likely_leader_label()}.", ""])
+    for item in result["items"]:
+        lines.extend([f"### {item['subject']}", ""])
+        lines.extend(f"- {observation}" for observation in item["observations"])
+        if item["review_questions"]:
+            lines.append("- Review questions:")
+            lines.extend(f"  - {question}" for question in item["review_questions"])
+        lines.append("")
+    if result["warnings"]:
+        lines.append("**Warnings:** " + "; ".join(result["warnings"]))
+        lines.append("")
+    lines.append("**Mode limitations:** " + " ".join(result["limitations"]))
+    return "\n".join(lines)
+
+
+def _failed_report(summary: ReplaySummary, mode: str) -> str:
     """Partial counters from a failed parse are unreliable, so they are never rendered."""
     lines = ["# AoK Replay Analysis", "", _markdown_table(["Field", "Value"], [
         ["File", f"`{summary.source_path.name}`"],
         ["Map", summary.map_name or "Unknown"],
         ["Parser OK", False],
     ]), "", "Replay analysis did not complete, so no statistics are reported for this file.", ""]
-    if summary.warnings:
-        lines += ["## Warnings", ""] + [f"- {w}" for w in summary.warnings]
+    _section(lines, "Warnings", summary.warnings)
+    lines.append(_analysis_markdown(summary, mode))
     return "\n".join(lines).strip() + "\n"
 
 
-def markdown_report(summary: ReplaySummary) -> str:
+def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
     if not summary.parser_ok:
-        return _failed_report(summary)
+        return _failed_report(summary, mode)
     tables = _build_report_tables(summary)
 
     if Environment is not None:
@@ -1054,7 +1043,7 @@ def markdown_report(summary: ReplaySummary) -> str:
             unlock_labels=UNLOCK_LABELS,
             advanced_unit_labels=ADVANCED_UNIT_LABELS,
         )
-        return rendered.strip() + "\n"
+        return rendered.strip() + "\n\n" + _analysis_markdown(summary, mode) + "\n"
 
     # Fallback keeps the bot usable if an existing venv has not installed Jinja2 yet.
     lines: list[str] = []
@@ -1067,7 +1056,7 @@ def markdown_report(summary: ReplaySummary) -> str:
             ["Map", summary.map_name or "Unknown"],
             ["Duration", summary.duration_label()],
             ["Match mode", summary.match_mode],
-            ["Winning side", summary.winner_label()],
+            ["Winning side", summary.winner_label() + (f" (inferred statistical leader: {summary.likely_leader_label()})" if summary.likely_leader_label() else "")],
             ["Game version/build", summary.game_version or "Unknown"],
             ["Parser OK", summary.parser_ok],
             ["Report format", "compact table layout; install Jinja2 for template rendering"],
@@ -1150,6 +1139,8 @@ def markdown_report(summary: ReplaySummary) -> str:
         lines.append(_markdown_table(["Event type", "Count"], tables["raw_event_rows"], right=[1]))
         lines.append("")
 
+    lines.extend([_analysis_markdown(summary, mode), ""])
+
     if summary.warnings:
         _section(lines, "Warnings", summary.warnings)
 
@@ -1168,9 +1159,18 @@ def markdown_report(summary: ReplaySummary) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def save_markdown_report(summary: ReplaySummary, reports_dir: Path) -> Path:
+def validate_mode(mode: str) -> None:
+    if mode not in {"stats", "coaching", "team"}:
+        raise ValueError("Unsupported report mode")
+
+
+def save_markdown_report(summary: ReplaySummary, reports_dir: Path, mode: str = "stats") -> Path:
+    import uuid
+    validate_mode(mode)
+    content = discord.utils.escape_mentions(markdown_report(summary, mode))
     reports_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = ''.join(ch if ch.isalnum() or ch in '._- ' else '_' for ch in summary.source_path.stem)
-    path = reports_dir / f"{safe_name}.md"
-    path.write_text(markdown_report(summary), encoding="utf-8")
+    safe_name = ''.join(ch if ch.isascii() and (ch.isalnum() or ch in '._-') else '_' for ch in summary.source_path.stem)[:64] or "replay"
+    path = reports_dir / f"{safe_name}-{mode}-{uuid.uuid4().hex}.md"
+    with path.open("x", encoding="utf-8") as out:
+        out.write(content)
     return path
