@@ -182,3 +182,7 @@ bash scripts/deploy_tomo.sh
 The update script creates a timestamped SQLite backup, fast-forwards `main`,
 rebuilds the image, recreates the bot container, and prints the deployed Git
 revision and recent logs.
+
+## License and AI use
+
+All rights reserved. This repository is not licensed for reuse, and it may not be scraped or used for text and data mining or AI training. See [`NOTICE`](NOTICE) for the complete terms.
