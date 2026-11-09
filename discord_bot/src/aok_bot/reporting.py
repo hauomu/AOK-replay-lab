@@ -882,7 +882,7 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 - PvP K/L excludes animal kills; animal K/D is tracked separately.
 - Exact age costs and hard prerequisite chains still need AoK map metadata or TwoDie confirmation; inferred relationships are labelled as such.
 - FFA/no-alliance games are split into one analysis side per player; team games still aggregate allied players.
-- Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while present), because AoK leaves SC2's collection-rate field at 0.
+- Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while gathering), because AoK leaves SC2's collection-rate field at 0. Starting stock is excluded; market trades count as income in the bought resource.
 - Iron is shown as `n/a` when Terrazine fields are absent, rather than being silently treated as zero.
 - Role and tech-lead labels are heuristic reads based on observed events, timings, resources, units, structures, and combat conversion.
 """
@@ -1152,7 +1152,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
         "- PvP K/L excludes animal kills; animal K/D is tracked separately.",
         "- Exact age costs and hard prerequisite chains still need AoK map metadata or TwoDie confirmation; inferred relationships are labelled as such.",
         "- FFA/no-alliance games are split into one analysis side per player; team games still aggregate allied players.",
-        "- Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while present), because AoK leaves SC2's collection-rate field at 0.",
+        "- Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while gathering), because AoK leaves SC2's collection-rate field at 0. Starting stock is excluded; market trades count as income in the bought resource.",
         "- Iron is shown as `n/a` when Terrazine fields are absent, rather than being silently treated as zero.",
         "- Role and tech-lead labels are heuristic reads based on observed events, timings, resources, units, structures, and combat conversion.",
     ])

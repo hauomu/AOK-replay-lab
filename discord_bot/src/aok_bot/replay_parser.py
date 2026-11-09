@@ -439,6 +439,35 @@ def _resource_sample_from_stats(stats: Any) -> tuple[dict[str, dict[str, int]], 
 
 
 RATE_WINDOW_SECONDS = 60
+STARTING_STOCK_WINDOW_SECONDS = 240
+STARTING_STOCK_MIN_JUMP = 600
+
+
+def _remove_starting_stock(
+    state: dict[str, dict[str, Any]],
+    sample: dict[str, dict[str, int]],
+    seconds: int | None,
+) -> None:
+    """Subtract map-granted starting stock from the gathered estimate.
+
+    The first sample's stockpile is starting resources. AoK then spawns each
+    player's starting units/buildings in one tick inside the first minutes
+    (1,000-2,300 per resource on default settings, far more with lobby
+    resource options); their value lands in UsedCurrent* without any
+    gathering. Real early income stays well below STARTING_STOCK_MIN_JUMP
+    per 10 s sample, so the first early jump that size is treated as the grant.
+    """
+    for resource, values in sample.items():
+        raw = int(values.get("gathered_estimate", 0) or 0)
+        st = state.setdefault(resource, {"prev": None, "offset": 0, "grant_seen": False})
+        prev, st["prev"] = st["prev"], raw
+        if prev is None:
+            st["offset"] = raw
+        elif (not st["grant_seen"] and seconds is not None
+              and seconds <= STARTING_STOCK_WINDOW_SECONDS and raw - prev >= STARTING_STOCK_MIN_JUMP):
+            st["offset"] += raw - prev
+            st["grant_seen"] = True
+        values["gathered_estimate"] = max(0, raw - st["offset"])
 
 
 def _derive_gather_rates(
@@ -466,9 +495,16 @@ def _derive_gather_rates(
         values["rate"] = max(0, round((gathered - start_gathered) * 60 / elapsed)) if elapsed > 0 else 0
 
 
-def _apply_resource_sample(player: PlayerStats, sample: dict[str, dict[str, int]]) -> None:
+def _apply_resource_sample(
+    player: PlayerStats, sample: dict[str, dict[str, int]], seconds: int | None = None,
+) -> None:
     if not sample:
         return
+    if seconds is not None and any(
+        int(values.get("gathered_estimate", 0) or 0) > player.resource_gathered_estimate.get(resource, 0)
+        for resource, values in sample.items()
+    ):
+        player.resource_last_gain_seconds = seconds
     player.resource_samples += 1
     for resource, values in sample.items():
         current = int(values.get("current", player.resource_current.get(resource, 0)) or 0)
@@ -585,6 +621,9 @@ def _set_result_if_weaker(player: PlayerStats, result: str) -> None:
         player.result = result
 
 
+END_EXIT_SECONDS = 15
+
+
 def _apply_leave_based_results(summary: ReplaySummary) -> None:
     """Infer losses/wins from leave events.
 
@@ -625,6 +664,36 @@ def _apply_leave_based_results(summary: ReplaySummary) -> None:
                 summary.key_findings.append(
                     "Leave-based result inference: every FFA side has a leave event, so the report keeps the official winner as unknown instead of inventing a winner."
                 )
+        return
+
+    # SC2 marks every player still in the game at the end as Win, so an AoK
+    # game ended with both sides present can record Win on opposing teams.
+    # That metadata names no winner. Only a side that had fully left before
+    # the closing exits (everyone quits in the last seconds) counts as beaten.
+    win_sides = [tid for tid, ps in grouped.items() if any(p.result == "Win" for p in ps)]
+    if len(win_sides) > 1:
+        end = summary.duration_seconds
+        cutoff = end - END_EXIT_SECONDS if end else None
+        beaten = [
+            tid for tid, ps in grouped.items()
+            if all(p.leave_time_seconds is not None and (cutoff is None or p.leave_time_seconds < cutoff) for p in ps)
+        ]
+        for player in summary.players:
+            player.result = "Undecided"
+        if len(beaten) == len(grouped) - 1:
+            for tid, ps in grouped.items():
+                for player in ps:
+                    player.result = "Loss" if tid in beaten else "Win"
+            winner = next(tid for tid in grouped if tid not in beaten)
+            summary.key_findings.append(
+                "Replay metadata marks players on more than one side as Win; "
+                f"Team {winner} is the only side not fully gone before the end, so it is treated as the winner."
+            )
+        else:
+            summary.key_findings.append(
+                "Replay metadata marks players on more than one side as Win (players still present at the end), "
+                "so no winner is claimed."
+            )
         return
 
     # Team/duel mode: a side loses once every player on that side has left.
@@ -710,7 +779,10 @@ def _build_team_stats(summary: ReplaySummary) -> None:
             team.resource_peak_current[resource] += int(p.resource_peak_current.get(resource, 0) or 0)
             team.resource_peak_collection_rate[resource] += int(p.resource_peak_collection_rate.get(resource, 0) or 0)
             team.resource_gathered_estimate[resource] += int(p.resource_gathered_estimate.get(resource, 0) or 0)
-            active_seconds = p.leave_time_seconds or summary.duration_seconds or 0
+            # A leaver's slot can keep collecting (shared control), so average
+            # over whichever is later: leaving or the last resource gain.
+            active_seconds = max(p.leave_time_seconds or 0, p.resource_last_gain_seconds or 0)
+            active_seconds = active_seconds or summary.duration_seconds or 0
             if active_seconds > 0:
                 p.resource_average_rate[resource] = round(
                     int(p.resource_gathered_estimate.get(resource, 0) or 0) * 60 / active_seconds)
@@ -1200,6 +1272,7 @@ def parse_replay(path: Path) -> ReplaySummary:
         resource_fields_seen: set[str] = set()
         player_stats_event_count = 0
         gather_history: dict[int, dict[str, deque[tuple[int, int]]]] = defaultdict(dict)
+        starting_stock: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
         team_peak_rate: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
         team_timeline_state: dict[int, dict[str, Any]] = defaultdict(
@@ -1460,9 +1533,10 @@ def parse_replay(path: Path) -> ReplaySummary:
                         sample, seen_channels, seen_fields = _resource_sample_from_stats(event.get("m_stats", {}))
                         resource_channels_seen.update(seen_channels)
                         resource_fields_seen.update(seen_fields)
-                        _derive_gather_rates(
-                            gather_history[id(player)], sample, _seconds_from_loops(event.get("_gameloop")))
-                        _apply_resource_sample(player, sample)
+                        sample_seconds = _seconds_from_loops(event.get("_gameloop"))
+                        _remove_starting_stock(starting_stock[id(player)], sample, sample_seconds)
+                        _derive_gather_rates(gather_history[id(player)], sample, sample_seconds)
+                        _apply_resource_sample(player, sample, sample_seconds)
                         refresh_side_state(player)
         except Exception as exc:
             summary.warnings.append(f"Could not decode tracker events: {exc}")
