@@ -101,6 +101,7 @@ class PlayerStats:
     resource_gathered_estimate: dict[str, int] = field(default_factory=_resource_dict)
     resource_lost_value: dict[str, int] = field(default_factory=_resource_dict)
     resource_samples: int = 0
+    resource_last_gain_seconds: int | None = None
 
     def kill_loss_ratio(self) -> float | None:
         if self.losses <= 0:
