@@ -692,8 +692,9 @@ def _apply_leave_based_results(summary: ReplaySummary) -> None:
         else:
             summary.key_findings.append(
                 "Replay metadata marks players on more than one side as Win (players still present at the end), "
-                "so no winner is claimed."
+                "so no winner is recorded."
             )
+            _infer_likely_winner(summary, grouped)
         return
 
     # Team/duel mode: a side loses once every player on that side has left.
@@ -727,6 +728,46 @@ def _apply_leave_based_results(summary: ReplaySummary) -> None:
             summary.key_findings.append(
                 f"Leave-based result inference: Team {winning_team_id} is the only side not fully eliminated by leave events, so it is treated as the winning side."
             )
+        else:
+            _infer_likely_winner(summary, grouped)
+
+
+def _infer_likely_winner(summary: ReplaySummary, grouped: dict[int, list[PlayerStats]]) -> None:
+    """Name a likely winner when the replay ends with both sides present.
+
+    Players usually leave once the game is decided, and mostly the losers.
+    Checked on 71 corpus team games with a recorded winner, cut up to 5
+    minutes before the losing side was gone: the side with the larger share
+    of players already gone lost every time this rule made a call. Exits in
+    the closing seconds are ignored. Results are stored as Likely win/loss,
+    never as Win/Loss.
+    """
+    if len(grouped) != 2 or any(p.result == "Win" for ps in grouped.values() for p in ps):
+        return
+    end = summary.duration_seconds
+    cutoff = end - END_EXIT_SECONDS if end else None
+
+    def gone(p: PlayerStats) -> bool:
+        return p.leave_time_seconds is not None and (cutoff is None or p.leave_time_seconds < cutoff)
+
+    share = {tid: sum(gone(p) for p in ps) / len(ps) for tid, ps in grouped.items() if ps}
+    if len(share) != 2:
+        return
+    winner, loser = sorted(share, key=share.get)
+    if share[winner] == share[loser]:
+        return
+    for player in grouped[winner]:
+        if player.result in (None, "", "Undecided"):
+            player.result = "Likely win"
+    for player in grouped[loser]:
+        if player.result in (None, "", "Undecided"):
+            player.result = "Likely loss"
+    gone_count = {tid: sum(gone(p) for p in grouped[tid]) for tid in (winner, loser)}
+    summary.key_findings.append(
+        f"Likely result (not recorded in the replay): Team {loser} had {gone_count[loser]} of {len(grouped[loser])} "
+        f"player(s) gone before the end versus {gone_count[winner]} of {len(grouped[winner])} on Team {winner}, "
+        f"so Team {winner} is treated as the likely winner."
+    )
 
 def _merge_earliest(target: dict[str, int], source: dict[str, int]) -> None:
     for key, seconds in source.items():
@@ -1014,6 +1055,11 @@ def _build_match_story(summary: ReplaySummary) -> None:
                     )
                 else:
                     summary.verdict = "Free-for-all detected, but no clean winner was found in replay metadata; analysis is based on combat, survival, activity, and leave patterns."
+            elif summary.likely_winner_label():
+                summary.verdict = (
+                    f"No winner was recorded in the replay. Likely winner, inferred from who left: "
+                    f"{summary.likely_winner_label()}. Analysis is based on combat, activity, and leave patterns."
+                )
             else:
                 summary.verdict = "No clean winner was detected in replay metadata; analysis is based on combat, activity, and leave patterns."
 
@@ -1027,6 +1073,10 @@ def _build_match_story(summary: ReplaySummary) -> None:
                 result_word = "won"
             elif t.result == "Loss":
                 result_word = "lost"
+            elif t.result == "Likely win":
+                result_word = "likely won (inferred from who left)"
+            elif t.result == "Likely loss":
+                result_word = "likely lost (inferred from who left)"
             else:
                 result_word = "did not get a clear win result"
             eval_line = (
@@ -1149,6 +1199,8 @@ def _build_match_story(summary: ReplaySummary) -> None:
     winners = summary.winner_label()
     if winners != "Unknown":
         story.insert(0, f"Winning side detected as {winners}.")
+    elif summary.likely_winner_label():
+        story.insert(0, f"Likely winning side, inferred from who left: {summary.likely_winner_label()}.")
 
     summary.key_findings = findings
     summary.match_story = story

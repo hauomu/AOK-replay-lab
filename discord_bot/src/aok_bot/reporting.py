@@ -190,6 +190,10 @@ def _team_line_summary(team: TeamStats, match_mode: str | None = None) -> str:
         result = "won"
     elif team.result == "Loss":
         result = "lost"
+    elif team.result == "Likely win":
+        result = "likely won (inferred from who left)"
+    elif team.result == "Likely loss":
+        result = "likely lost (inferred from who left)"
     else:
         result = "no clear win result"
     return (
@@ -644,7 +648,7 @@ REPORT_TEMPLATE = r"""# AoK Replay Analysis
 | Map | {{ (summary.map_name or 'Unknown') | md }} |
 | Duration | {{ summary.duration_label() | md }} |
 | Match mode | {{ summary.match_mode | md }} |
-| Winning side | {{ summary.winner_label() | md }}{% if summary.likely_leader_label() %} (inferred statistical leader: {{ summary.likely_leader_label() | md }}){% endif %} |
+| Winning side | {{ summary.winner_display() | md }} |
 | Game version/build | {{ (summary.game_version or 'Unknown') | md }} |
 | Parser OK | {{ summary.parser_ok }} |
 | Report format | Jinja2 compact table layout |
@@ -906,9 +910,7 @@ def make_match_embed(summary: ReplaySummary) -> discord.Embed:
     embed.add_field(name="Duration", value=summary.duration_label(), inline=True)
     embed.add_field(name="Players", value=str(len(summary.players)) if summary.players else "unknown", inline=True)
     embed.add_field(name="Mode", value=summary.match_mode, inline=True)
-    leader = summary.likely_leader_label()
-    winner = f"Not recorded; likely leader: {leader}" if leader else summary.winner_label()
-    embed.add_field(name="Winner", value=winner, inline=True)
+    embed.add_field(name="Winner", value=summary.winner_display(), inline=True)
     embed.add_field(name="Parser", value="OK" if summary.parser_ok else "limited", inline=True)
 
     side_rosters = _side_roster_lines(summary)
@@ -1056,7 +1058,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
             ["Map", summary.map_name or "Unknown"],
             ["Duration", summary.duration_label()],
             ["Match mode", summary.match_mode],
-            ["Winning side", summary.winner_label() + (f" (inferred statistical leader: {summary.likely_leader_label()})" if summary.likely_leader_label() else "")],
+            ["Winning side", summary.winner_display()],
             ["Game version/build", summary.game_version or "Unknown"],
             ["Parser OK", summary.parser_ok],
             ["Report format", "compact table layout; install Jinja2 for template rendering"],

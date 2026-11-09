@@ -86,7 +86,7 @@ class ContradictoryResultTests(unittest.TestCase):
         return ReplaySummary(Path("x"), parser_ok=True, match_mode="Team", duration_seconds=3033,
                              players=list(players))
 
-    def test_win_on_both_teams_names_no_winner(self):
+    def test_win_on_both_teams_names_no_recorded_winner(self):
         s = self.summary(
             # Corpus shape (replay 112): closing exits in the last seconds.
             PlayerStats("A", team_id=0, result="Win"),
@@ -95,8 +95,10 @@ class ContradictoryResultTests(unittest.TestCase):
             PlayerStats("D", team_id=1, result="Undecided", leave_time_seconds=2291),
         )
         _apply_leave_based_results(s)
-        self.assertEqual({p.result for p in s.players}, {"Undecided"})
+        self.assertNotIn("Win", {p.result for p in s.players})
         self.assertTrue(any("more than one side" in k for k in s.key_findings))
+        # One player per side left early, so the shares tie: no likely call.
+        self.assertEqual({p.result for p in s.players}, {"Undecided"})
 
     def test_win_on_both_teams_falls_back_to_leave_events(self):
         s = self.summary(
@@ -113,6 +115,46 @@ class ContradictoryResultTests(unittest.TestCase):
         )
         _apply_leave_based_results(s)
         self.assertEqual([p.result for p in s.players], ["Win", "Loss"])
+
+
+@unittest.skipIf(_derive_gather_rates is None, "replay parser dependencies unavailable")
+class LikelyWinnerTests(unittest.TestCase):
+    def run_case(self, *players, duration=2000):
+        s = ReplaySummary(Path("x"), parser_ok=True, match_mode="Team", duration_seconds=duration,
+                          players=list(players))
+        _apply_leave_based_results(s)
+        _build_team_stats(s)
+        return s
+
+    def test_side_with_larger_share_gone_is_likely_loser(self):
+        s = self.run_case(
+            PlayerStats("A", team_id=0, result="Undecided"),
+            PlayerStats("B", team_id=0, result="Undecided", leave_time_seconds=1990),  # closing exit
+            PlayerStats("C", team_id=1, result="Undecided", leave_time_seconds=1500),
+            PlayerStats("D", team_id=1, result="Undecided"),
+        )
+        self.assertEqual([p.result for p in s.players], ["Likely win", "Likely win", "Likely loss", "Likely loss"])
+        self.assertEqual(s.winner_label(), "Unknown")
+        self.assertEqual(s.likely_winner_label(), "Team 0 (A, B)")
+        self.assertIn("inferred from who left", s.winner_display())
+
+    def test_equal_share_gone_makes_no_call(self):
+        s = self.run_case(
+            PlayerStats("A", team_id=0, result="Undecided", leave_time_seconds=900),
+            PlayerStats("B", team_id=0, result="Undecided"),
+            PlayerStats("C", team_id=1, result="Undecided", leave_time_seconds=1200),
+            PlayerStats("D", team_id=1, result="Undecided"),
+        )
+        self.assertEqual({p.result for p in s.players}, {"Undecided"})
+        self.assertIsNone(s.likely_winner_label())
+
+    def test_recorded_winner_is_not_overridden(self):
+        s = self.run_case(
+            PlayerStats("A", team_id=0, result="Win", leave_time_seconds=100),
+            PlayerStats("B", team_id=1, result="Undecided"),
+        )
+        self.assertEqual([p.result for p in s.players], ["Win", "Undecided"])
+        self.assertIsNone(s.likely_winner_label())
 
 
 if __name__ == "__main__":

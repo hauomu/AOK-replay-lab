@@ -277,6 +277,26 @@ class ReplaySummary:
             return ", ".join(f"Team {team}" for team in winners)
         return "Unknown"
 
+    def likely_winner_label(self) -> str | None:
+        """Side inferred from who left, when the replay records no winner."""
+        if self.winner_label() != "Unknown":
+            return None
+        likely = [t for t in self.teams if t.result == "Likely win"]
+        if len(likely) != 1:
+            return None
+        team = likely[0]
+        base = team.label or f"Team {team.team_id}"
+        return f"{base} ({', '.join(team.players)})" if team.players else base
+
+    def winner_display(self) -> str:
+        likely = self.likely_winner_label()
+        if likely:
+            return f"Not recorded; likely {likely} (inferred from who left)"
+        leader = self.likely_leader_label()
+        if leader:
+            return f"Not recorded; likely leader: {leader}"
+        return self.winner_label()
+
     def likely_leader_label(self) -> str | None:
         if self.match_mode != "Free-for-all" or self.winner_label() != "Unknown":
             return None
