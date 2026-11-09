@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-ARG S2PROTOCOL_REF=fbb98e80aee825d6deeabd7b48b51cbecebde062
+ARG S2PROTOCOL_REF=3b40c5ef01834096b4305172ef5485ec00133dcc
 ARG VCS_REF=unknown
 
 LABEL org.opencontainers.image.source="https://github.com/hauomu/AOK-replay-lab" \

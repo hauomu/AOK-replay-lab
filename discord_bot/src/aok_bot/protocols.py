@@ -7,6 +7,14 @@ COMPATIBLE_PROTOCOLS = {
 }
 
 
+class UnsupportedReplayBuild(ImportError):
+    """No decoder for this replay's base build: s2protocol needs an update."""
+
+    def __init__(self, base_build: int):
+        super().__init__(f"protocol{base_build}")
+        self.base_build = base_build
+
+
 def select_protocol(versions, base_build: int):
     """Return (decoder, decoder build); callers must disclose mapped decoding."""
     base_build = int(base_build)
@@ -18,6 +26,8 @@ def select_protocol(versions, base_build: int):
             expected, f"s2protocol.versions.{expected}",
         }
         target = COMPATIBLE_PROTOCOLS.get(base_build)
-        if not missing or target is None:
+        if not missing:
             raise
+        if target is None:
+            raise UnsupportedReplayBuild(base_build) from exc
         return versions.build(target), target
