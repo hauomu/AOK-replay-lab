@@ -370,9 +370,9 @@ def _build_player_table_groups(summary: ReplaySummary) -> list[dict[str, Any]]:
                 _resource_cell(summary, "gold", p.resource_current.get("gold", 0)),
                 _resource_cell(summary, "wood", p.resource_current.get("wood", 0)),
                 _resource_cell(summary, "iron", p.resource_current.get("iron", 0)),
-                _resource_cell(summary, "gold", p.resource_collection_rate.get("gold", 0)),
-                _resource_cell(summary, "wood", p.resource_collection_rate.get("wood", 0)),
-                _resource_cell(summary, "iron", p.resource_collection_rate.get("iron", 0)),
+                _resource_cell(summary, "gold", p.resource_average_rate.get("gold", 0)),
+                _resource_cell(summary, "wood", p.resource_average_rate.get("wood", 0)),
+                _resource_cell(summary, "iron", p.resource_average_rate.get("iron", 0)),
                 _resource_triplet(summary, p.resource_gathered_estimate),
             ]
             for p in group_players
@@ -591,9 +591,9 @@ def _build_report_tables(summary: ReplaySummary) -> dict[str, list[list[Any]]]:
             _resource_cell(summary, "gold", t.resource_current.get("gold", 0)),
             _resource_cell(summary, "wood", t.resource_current.get("wood", 0)),
             _resource_cell(summary, "iron", t.resource_current.get("iron", 0)),
-            _resource_cell(summary, "gold", t.resource_collection_rate.get("gold", 0)),
-            _resource_cell(summary, "wood", t.resource_collection_rate.get("wood", 0)),
-            _resource_cell(summary, "iron", t.resource_collection_rate.get("iron", 0)),
+            _resource_cell(summary, "gold", t.resource_average_rate.get("gold", 0)),
+            _resource_cell(summary, "wood", t.resource_average_rate.get("wood", 0)),
+            _resource_cell(summary, "iron", t.resource_average_rate.get("iron", 0)),
             _resource_triplet(summary, t.resource_gathered_estimate),
         ]
         for t in teams
@@ -734,7 +734,7 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 
 AoK labels the replay channels as **Gold = minerals**, **Wood = vespene**, and **Iron = terrazine**. `n/a` means the replay protocol did not expose that channel; it is not a confirmed zero.
 
-{{ table(['Side', 'Gold', 'Wood', 'Iron', 'Gold rate', 'Wood rate', 'Iron rate', 'Gathered estimate'], tables.side_resources, right=[1, 2, 3, 4, 5, 6]) }}
+{{ table(['Side', 'Gold', 'Wood', 'Iron', 'Gold/min avg', 'Wood/min avg', 'Iron/min avg', 'Gathered estimate'], tables.side_resources, right=[1, 2, 3, 4, 5, 6]) }}
 {% endif %}
 
 {% if summary.animal_stats %}
@@ -762,7 +762,7 @@ These are cumulative 5-minute snapshots. They support the turning-point read but
 
 ### {{ group.label }} — technology + resources
 
-{{ table(['Time', 'Age', 'Tech', 'Mechanical K/L', 'Gold', 'Wood', 'Iron', 'Gold rate', 'Wood rate', 'Iron rate'], group.tech_resource_rows, right=[2, 4, 5, 6, 7, 8, 9]) }}
+{{ table(['Time', 'Age', 'Tech', 'Mechanical K/L', 'Gold', 'Wood', 'Iron', 'Gold/min', 'Wood/min', 'Iron/min'], group.tech_resource_rows, right=[2, 4, 5, 6, 7, 8, 9]) }}
 
 {% endfor -%}
 {% endif %}
@@ -795,7 +795,7 @@ These are cumulative 5-minute snapshots. They support the turning-point read but
 {% for group in player_table_groups -%}
 ### {{ group.label }}
 
-{{ table(['Player', 'Gold', 'Wood', 'Iron', 'Gold rate', 'Wood rate', 'Iron rate', 'Gathered estimate'], group.resource_rows, right=[1, 2, 3, 4, 5, 6]) }}
+{{ table(['Player', 'Gold', 'Wood', 'Iron', 'Gold/min avg', 'Wood/min avg', 'Iron/min avg', 'Gathered estimate'], group.resource_rows, right=[1, 2, 3, 4, 5, 6]) }}
 
 {% endfor -%}
 
@@ -827,7 +827,7 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 - **Gameplay upgrades by observed age:** {{ timed_items_with_age(p.tech_upgrade_first_seconds, empty_labels, p.tech_upgrade_age_labels, 10) }}
 - **Advanced units:** {{ timed_items_with_age(p.advanced_unit_first_seconds, advanced_unit_labels, p.advanced_unit_age_labels, 8) }}
 - **Inferred unit requirements:** {{ advanced_requirement_items(p) }}
-- **Resources:** current {{ resource_triplet(summary, p.resource_current) }}; rates {{ resource_triplet(summary, p.resource_collection_rate) }}; gathered estimate {{ resource_triplet(summary, p.resource_gathered_estimate) }}
+- **Resources:** current {{ resource_triplet(summary, p.resource_current) }}; gather per minute avg {{ resource_triplet(summary, p.resource_average_rate) }}, peak {{ resource_triplet(summary, p.resource_peak_collection_rate) }}; gathered estimate {{ resource_triplet(summary, p.resource_gathered_estimate) }}
 - **Mechanical:** {{ p.mechanical_units }} assets, {{ p.mechanical_kills }}/{{ p.mechanical_losses }} K/L; trebuchets {{ p.trebuchets_total }} total, {{ p.trebuchets_sieged }} reached siege mode, {{ p.trebuchet_mobile_deaths }} move-mode deaths, {{ p.trebuchet_sieged_deaths }} siege-mode deaths
 - **Top units:** {{ top_items(p.top_units(8)) }}
 {% if p.top_structures() -%}
@@ -882,7 +882,7 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 - PvP K/L excludes animal kills; animal K/D is tracked separately.
 - Exact age costs and hard prerequisite chains still need AoK map metadata or TwoDie confirmation; inferred relationships are labelled as such.
 - FFA/no-alliance games are split into one analysis side per player; team games still aggregate allied players.
-- Resource gathered/lost totals are score-value estimates; current stockpile and collection rate are direct tracker fields when exposed.
+- Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while present), because AoK leaves SC2's collection-rate field at 0.
 - Iron is shown as `n/a` when Terrazine fields are absent, rather than being silently treated as zero.
 - Role and tech-lead labels are heuristic reads based on observed events, timings, resources, units, structures, and combat conversion.
 """
@@ -1084,7 +1084,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
         lines.extend(["", "## Side technology overview", ""])
         lines.append(_markdown_table(["Side", "Age", "Tech score", "Tech structures", "Key unlocks", "Advanced unit types", "Mechanical K/L", "Trebs T/S/M-loss"], tables["side_tech"], right=[2, 3, 4, 5]))
         lines.extend(["", "## Side resource overview", ""])
-        lines.append(_markdown_table(["Side", "Gold", "Wood", "Iron", "Gold rate", "Wood rate", "Iron rate", "Gathered estimate"], tables["side_resources"], right=[1, 2, 3, 4, 5, 6]))
+        lines.append(_markdown_table(["Side", "Gold", "Wood", "Iron", "Gold/min avg", "Wood/min avg", "Iron/min avg", "Gathered estimate"], tables["side_resources"], right=[1, 2, 3, 4, 5, 6]))
         lines.append("")
 
     if summary.animal_stats:
@@ -1104,7 +1104,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
             lines.extend([f"### {group['label']}", ""])
             lines.append(_markdown_table(["Time", "PvP K/L", "Units born", "Animal K/D"], group["rows"], right=[2]))
             lines.extend(["", f"### {group['label']} — technology + resources", ""])
-            lines.append(_markdown_table(["Time", "Age", "Tech", "Mechanical K/L", "Gold", "Wood", "Iron", "Gold rate", "Wood rate", "Iron rate"], group["tech_resource_rows"], right=[2, 4, 5, 6, 7, 8, 9]))
+            lines.append(_markdown_table(["Time", "Age", "Tech", "Mechanical K/L", "Gold", "Wood", "Iron", "Gold/min", "Wood/min", "Iron/min"], group["tech_resource_rows"], right=[2, 4, 5, 6, 7, 8, 9]))
             lines.append("")
 
     if summary.players:
@@ -1123,7 +1123,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
         lines.extend(["## Player resource tracking", ""])
         for group in _build_player_table_groups(summary):
             lines.extend([f"### {group['label']}", ""])
-            lines.append(_markdown_table(["Player", "Gold", "Wood", "Iron", "Gold rate", "Wood rate", "Iron rate", "Gathered estimate"], group["resource_rows"], right=[1, 2, 3, 4, 5, 6]))
+            lines.append(_markdown_table(["Player", "Gold", "Wood", "Iron", "Gold/min avg", "Wood/min avg", "Iron/min avg", "Gathered estimate"], group["resource_rows"], right=[1, 2, 3, 4, 5, 6]))
             lines.append("")
         lines.extend(["## Player technology profiles", ""])
         for group in _build_player_table_groups(summary):
@@ -1152,7 +1152,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
         "- PvP K/L excludes animal kills; animal K/D is tracked separately.",
         "- Exact age costs and hard prerequisite chains still need AoK map metadata or TwoDie confirmation; inferred relationships are labelled as such.",
         "- FFA/no-alliance games are split into one analysis side per player; team games still aggregate allied players.",
-        "- Resource gathered/lost totals are score-value estimates; current stockpile and collection rate are direct tracker fields when exposed.",
+        "- Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while present), because AoK leaves SC2's collection-rate field at 0.",
         "- Iron is shown as `n/a` when Terrazine fields are absent, rather than being silently treated as zero.",
         "- Role and tech-lead labels are heuristic reads based on observed events, timings, resources, units, structures, and combat conversion.",
     ])

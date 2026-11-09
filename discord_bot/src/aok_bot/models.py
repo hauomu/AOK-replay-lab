@@ -89,12 +89,15 @@ class PlayerStats:
     tech_score: int = 0
 
     # AoK labels: Gold=SC2 minerals, Wood=SC2 vespene, Iron=SC2 terrazine.
-    # Current/rate are the latest observed tracker values. Gathered/lost are
+    # Current is the latest tracker value. AoK leaves SC2's CollectionRate
+    # field at 0, so rate is per minute over the trailing 60 s, derived from
+    # gathered-estimate deltas; average is gathered per minute while present. Gathered/lost are
     # score-value estimates derived from SPlayerStatsEvent fields.
     resource_current: dict[str, int] = field(default_factory=_resource_dict)
     resource_collection_rate: dict[str, int] = field(default_factory=_resource_dict)
     resource_peak_current: dict[str, int] = field(default_factory=_resource_dict)
     resource_peak_collection_rate: dict[str, int] = field(default_factory=_resource_dict)
+    resource_average_rate: dict[str, int] = field(default_factory=_resource_dict)
     resource_gathered_estimate: dict[str, int] = field(default_factory=_resource_dict)
     resource_lost_value: dict[str, int] = field(default_factory=_resource_dict)
     resource_samples: int = 0
@@ -182,6 +185,7 @@ class TeamStats:
     resource_collection_rate: dict[str, int] = field(default_factory=_resource_dict)
     resource_peak_current: dict[str, int] = field(default_factory=_resource_dict)
     resource_peak_collection_rate: dict[str, int] = field(default_factory=_resource_dict)
+    resource_average_rate: dict[str, int] = field(default_factory=_resource_dict)
     resource_gathered_estimate: dict[str, int] = field(default_factory=_resource_dict)
     resource_lost_value: dict[str, int] = field(default_factory=_resource_dict)
 
