@@ -7,7 +7,7 @@ import os
 import re
 import sys
 import types
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
@@ -418,7 +418,8 @@ def _resource_sample_from_stats(stats: Any) -> tuple[dict[str, dict[str, int]], 
         used = sum(
             max(0, int(value or 0))
             for key, value in matching.items()
-            if f"{protocol_label}Used" in key
+            # UsedActiveForces already overlaps UsedCurrentArmy + UsedInProgressArmy.
+            if f"{protocol_label}UsedCurrent" in key or f"{protocol_label}UsedInProgress" in key
         )
         lost = sum(
             abs(int(value or 0))
@@ -435,6 +436,34 @@ def _resource_sample_from_stats(stats: Any) -> tuple[dict[str, dict[str, int]], 
         }
 
     return samples, seen_channels, seen_fields
+
+
+RATE_WINDOW_SECONDS = 60
+
+
+def _derive_gather_rates(
+    history: dict[str, deque[tuple[int, int]]],
+    sample: dict[str, dict[str, int]],
+    seconds: int | None,
+) -> None:
+    """Fill per-minute rates from gathered-estimate deltas over the trailing window.
+
+    AoK grants resources through triggers, so SC2's CollectionRate tracker
+    field stays 0. A non-zero tracker rate is kept as-is.
+    """
+    if seconds is None:
+        return
+    for resource, values in sample.items():
+        points = history.setdefault(resource, deque())
+        gathered = int(values.get("gathered_estimate", 0) or 0)
+        points.append((seconds, gathered))
+        while len(points) > 1 and points[1][0] <= seconds - RATE_WINDOW_SECONDS:
+            points.popleft()
+        if int(values.get("rate", 0) or 0) > 0:
+            continue
+        start_seconds, start_gathered = points[0]
+        elapsed = seconds - start_seconds
+        values["rate"] = max(0, round((gathered - start_gathered) * 60 / elapsed)) if elapsed > 0 else 0
 
 
 def _apply_resource_sample(player: PlayerStats, sample: dict[str, dict[str, int]]) -> None:
@@ -681,6 +710,11 @@ def _build_team_stats(summary: ReplaySummary) -> None:
             team.resource_peak_current[resource] += int(p.resource_peak_current.get(resource, 0) or 0)
             team.resource_peak_collection_rate[resource] += int(p.resource_peak_collection_rate.get(resource, 0) or 0)
             team.resource_gathered_estimate[resource] += int(p.resource_gathered_estimate.get(resource, 0) or 0)
+            active_seconds = p.leave_time_seconds or summary.duration_seconds or 0
+            if active_seconds > 0:
+                p.resource_average_rate[resource] = round(
+                    int(p.resource_gathered_estimate.get(resource, 0) or 0) * 60 / active_seconds)
+            team.resource_average_rate[resource] += p.resource_average_rate[resource]
             team.resource_lost_value[resource] += int(p.resource_lost_value.get(resource, 0) or 0)
 
     for team in teams.values():
@@ -730,7 +764,8 @@ def _build_tech_evaluations(summary: ReplaySummary) -> list[str]:
         ) or "none recorded"
         resource_read = (
             f" Latest stockpile: {_resource_triplet(team.resource_current, summary.resource_channels_seen)}; "
-            f"collection-rate snapshot: {_resource_triplet(team.resource_collection_rate, summary.resource_channels_seen)}; "
+            f"gather rate per minute: average {_resource_triplet(team.resource_average_rate, summary.resource_channels_seen)}, "
+            f"peak {_resource_triplet(team.resource_peak_collection_rate, summary.resource_channels_seen)}; "
             f"gathered estimate: {_resource_triplet(team.resource_gathered_estimate, summary.resource_channels_seen)}."
             if resources_available else
             " Resource tracker fields were not available in this replay."
@@ -1164,6 +1199,8 @@ def parse_replay(path: Path) -> ReplaySummary:
         resource_channels_seen: set[str] = set()
         resource_fields_seen: set[str] = set()
         player_stats_event_count = 0
+        gather_history: dict[int, dict[str, deque[tuple[int, int]]]] = defaultdict(dict)
+        team_peak_rate: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
         team_timeline_state: dict[int, dict[str, Any]] = defaultdict(
             lambda: {
@@ -1196,6 +1233,7 @@ def parse_replay(path: Path) -> ReplaySummary:
             for resource in ("gold", "wood", "iron"):
                 state[resource] = sum(int(p.resource_current.get(resource, 0) or 0) for p in members)
                 state[f"{resource}_rate"] = sum(int(p.resource_collection_rate.get(resource, 0) or 0) for p in members)
+                team_peak_rate[team_id][resource] = max(team_peak_rate[team_id][resource], state[f"{resource}_rate"])
             age_player = max(members, key=lambda p: p.age_stage(), default=None)
             state["age"] = age_player.current_age() if age_player else "Starting age"
             state["tech_score"] = _side_frontier_tech_score(members)
@@ -1422,6 +1460,8 @@ def parse_replay(path: Path) -> ReplaySummary:
                         sample, seen_channels, seen_fields = _resource_sample_from_stats(event.get("m_stats", {}))
                         resource_channels_seen.update(seen_channels)
                         resource_fields_seen.update(seen_fields)
+                        _derive_gather_rates(
+                            gather_history[id(player)], sample, _seconds_from_loops(event.get("_gameloop")))
                         _apply_resource_sample(player, sample)
                         refresh_side_state(player)
         except Exception as exc:
@@ -1441,7 +1481,7 @@ def parse_replay(path: Path) -> ReplaySummary:
         )
         if resource_channels_seen:
             summary.resource_tracking_notes.append(
-                "Current stockpile and collection-rate values come directly from SPlayerStatsEvent; gathered/lost totals are score-value estimates."
+                "Current stockpile comes directly from SPlayerStatsEvent; gathered/lost totals are score-value estimates, and gather rates per minute are derived from them."
             )
         else:
             summary.resource_tracking_notes.append(
@@ -1473,6 +1513,10 @@ def parse_replay(path: Path) -> ReplaySummary:
 
         _apply_leave_based_results(summary)
         _build_team_stats(summary)
+        for team in summary.teams:
+            if team.team_id in team_peak_rate:
+                # Best simultaneous 60 s window, not the sum of each player's own best.
+                team.resource_peak_collection_rate.update(team_peak_rate[team.team_id])
         _build_match_story(summary)
         summary.parser_ok = True
         return summary
