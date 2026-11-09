@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "discord_bot/src"))
-from aok_bot.protocols import select_protocol
+from aok_bot.protocols import UnsupportedReplayBuild, select_protocol
 
 
 class Registry:
@@ -33,6 +33,11 @@ class ProtocolSelectionTests(unittest.TestCase):
     def test_unknown_build_stays_unsupported(self):
         with self.assertRaisesRegex(ImportError, "protocol99999"):
             select_protocol(Registry({95299}), 99999)
+
+    def test_unknown_build_reports_its_base_build(self):
+        with self.assertRaises(UnsupportedReplayBuild) as ctx:
+            select_protocol(Registry({95299}), 99999)
+        self.assertEqual(ctx.exception.base_build, 99999)
 
     def test_internal_dependency_failure_is_not_hidden(self):
         registry = Registry({95299}, broken=96883)

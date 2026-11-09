@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import PlayerStats, ReplaySummary, TeamStats
-from .protocols import select_protocol
+from .protocols import UnsupportedReplayBuild, select_protocol
 from .match_rules import classify_role, classify_team, normalize_match_groups, user_player_indices
 
 
@@ -1477,6 +1477,13 @@ def parse_replay(path: Path) -> ReplaySummary:
         summary.parser_ok = True
         return summary
 
+    except UnsupportedReplayBuild as exc:
+        summary.game_version = str(exc.base_build)
+        summary.warnings.append(
+            f"Replay is from StarCraft II build {exc.base_build}, which this bot's s2protocol "
+            "decoder does not support yet. The bot needs an s2protocol update and redeploy.")
+        summary.map_name = f"Unknown - unsupported SC2 build {exc.base_build}"
+        return summary
     except Exception as exc:
         summary.warnings.append(f"Replay parse failed: {type(exc).__name__}: {exc}")
         summary.map_name = "Unknown - parse failed"
