@@ -2,11 +2,11 @@
 
 What is left. Prune closed items (record closures in `SESSION_HANDOFF.md`).
 
-> Last verified: 2026-11-10 19:25 SGT by Claude Opus 5.5. Full backlog with reasoning: `outputs/aok_remaining_work_and_twodie_requests.md`.
+> Last verified: 2026-11-10 23:00 SGT by Claude Opus 5.5. Full backlog with reasoning: `outputs/aok_remaining_work_and_twodie_requests.md`.
 
 ## Open
 
-1. **Duplicate games (branch `fix/duplicate-games`)** — code + tests done, not pushed. `replays.game_key` = lobby seed + accounts; a new copy replaces the stored game. After deploy, run `scripts/backfill_account_ids.py --apply` on the live DB (dry run on a copy: 13 keys, drops replay 12, the older copy of replay 13). Needs user OK; DB backup first.
+1. **Defense + map control (branch `feat/defense-tracking`)** — new `defense.py`: castles, guard towers, watch towers (= outposts), walls, gates, barricades per player: built/standing/lost, denied (destroyed while building / cancelled / unfinished), inferred builder kills and their outcome (resumed + delay, cancelled, destroyed, later push), denial inflicted; defense value standing on the chart; report section + embed field. 117 tests; sample `outputs/defense_test/`. Not pushed; ship needs user OK.
 2. **Stale stored history** — rows from before the fixes keep old durations/results; consider `/aok_reanalyze` or a parser-version column.
 3. **DB backups grow one per deploy** — cap to last N (needs user OK; deleting files).
 4. Remaining backlog items B5-B15 and features in Part C of the backlog file.

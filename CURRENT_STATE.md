@@ -2,13 +2,13 @@
 
 What is true now, so a future session does not have to rediscover it. Rewritten in place; history lives in `SESSION_HANDOFF.md`, reasons in `DECISIONS.md`.
 
-> Last verified: 2026-11-10 19:25 SGT by Claude Opus 5.5 (Claude Code). Read `NEXT_WORK.md` next.
+> Last verified: 2026-11-10 23:00 SGT by Claude Opus 5.5 (Claude Code). Read `NEXT_WORK.md` next.
 
 ## Where things are
 
 - **Repo:** `C:\Users\Sherman\Projects\AOK-replay-lab` (GitHub `hauomu/AOK-replay-lab`, default branch `main`). The older copy at `Desktop\Portfolio\aok-replay-lab` is not a git checkout; don't use it.
 - **Live bot:** Tomo, `~/aok-bot` (git checkout of `main`), container `aok-replay-bot`, deployed with `bash scripts/deploy_tomo.sh` (backs up the SQLite DB to `data/backups/` first, pulls `main`, rebuilds, restarts). Discord bot name "AoK FourDie Companion Bot". Secrets in `~/aok-bot/.env` (never read).
-- **Live revision:** `81528cb` (PR #18: players identified by Battle.net account), deployed 2026-11-10 19:17 SGT (backup `aok_bot-20261110T111726Z.sqlite3`); live DB backfilled (76 of 145 player rows have `account_id`). Before that `229d0d1` (PR #17: spending breakdown, biggest fights, food supply, timeline chart), deployed 19:01 SGT. First real Discord upload verified 19:06 SGT (replay 34): parsed, saved, chart shown in the embed (user-confirmed), report/chart/upload files deleted after sending. Corpus results for it: `outputs/corpus_check_final.jsonl`; sample report + chart for the user's own upload: `outputs/upload_test/`.
+- **Live revision:** `0706e7f` (PR #19: one stored row per game via `replays.game_key`), deployed 2026-11-10 22:37 SGT (backup `aok_bot-20261110T143740Z.sqlite3`); live DB backfilled: 12 replays keyed, duplicate replay 12 deleted (25 replays). Before that `81528cb` (PR #18: players identified by Battle.net account), deployed 19:17 SGT (backup `aok_bot-20261110T111726Z.sqlite3`); live DB backfilled (76 of 145 player rows have `account_id`). Before that `229d0d1` (PR #17: spending breakdown, biggest fights, food supply, timeline chart), deployed 19:01 SGT. First real Discord upload verified 19:06 SGT (replay 34): parsed, saved, chart shown in the embed (user-confirmed), report/chart/upload files deleted after sending. Corpus results for it: `outputs/corpus_check_final.jsonl`; sample report + chart for the user's own upload: `outputs/upload_test/`.
 - **Discord upload cache on Tomo:** `~/aok-bot/data/replays/` (root-owned, 30-day sweep).
 - **Local test replays:** `C:\Users\Sherman\Documents\StarCraft II\Accounts\250707847\2-S2-1-8333926\Replays\Multiplayer` (269 AoK replays). A copy is on Tomo at `/tmp/aokcorpus` (temporary).
 - **Corpus checker:** `outputs/corpus_check.py <dir> <out.jsonl>`, run inside a throwaway `docker run --rm` of the built image on Tomo (~10 min for 269 replays). Never `docker exec`/stop the live `aok-replay-bot`.

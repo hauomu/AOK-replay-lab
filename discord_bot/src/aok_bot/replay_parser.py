@@ -11,6 +11,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
+from .defense import DefenseTracker, defense_findings
 from .models import PlayerStats, ReplaySummary, TeamStats
 from .protocols import UnsupportedReplayBuild, select_protocol
 from .match_rules import classify_role, classify_team, normalize_match_groups, user_player_indices
@@ -27,12 +28,13 @@ SNAPSHOT_SECONDS = 5 * 60
 STRUCTURE_HINTS = (
     "House", "Farm", "Barracks", "Stable", "Archery", "Blacksmith", "Market", "Mill",
     "Lumber", "Mine", "Tower", "Castle", "Gate", "Wall", "Post", "Keep", "Town", "Hall",
-    "Workshop", "AlchemistsLab",
+    "Workshop", "AlchemistsLab", "Barricade",
 )
 STATIC_DEFENSE_HINTS = (
     "Wall", "Gate", "Tower", "WatchPost", "GuardPost", "GuardTower", "Castle", "Keep",
+    "Outpost", "Barricade",
 )
-WALL_GATE_HINTS = ("Wall", "Gate")
+WALL_GATE_HINTS = ("Wall", "Gate", "Barricade")
 CASTLE_HINTS = ("Castle", "Keep")
 CAVALRY_HINTS = ("Horse", "Knight", "Cavalry", "Mounted", "Rider")
 RANGED_HINTS = ("Archer", "Crossbow", "HandCannoneer", "Gun", "Rifle", "Musk", "Bow")
@@ -1683,6 +1685,12 @@ def parse_replay(path: Path) -> ReplaySummary:
         team_peak_rate: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         last_stats_loop: list[int | None] = [None]
 
+        def team_of(pid: int) -> int | None:
+            holder = _pid_to_player(players, pid)
+            return int(holder.team_id) if holder is not None and holder.team_id is not None else None
+
+        defenses = DefenseTracker(team_of, lambda unit_type: _cost_value(unit_costs.get(unit_type)))
+
         def record_series(seconds: int) -> None:
             if summary.economy_series and seconds - summary.economy_series[-1]["t"] < SERIES_STEP_SECONDS:
                 return
@@ -1696,6 +1704,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                     "army_value": sum(army_value[id(p)] for p in members),
                     "food_used": sum(p.food_used for p in members),
                     "food_cap": sum(p.food_cap for p in members),
+                    "defense_value": defenses.standing_value([players.index(p) + 1 for p in members]),
                 }
             summary.economy_series.append(point)
 
@@ -1817,6 +1826,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                 event_seconds = secs(loop)
                 snapshot_until(event_seconds)
                 event_name = event.get("_event")
+                defenses.on_event(event, event_seconds or 0)
 
                 if event_name == "NNet.Replay.Tracker.SUnitBornEvent":
                     unit_type = _decode_unit_type(event.get("m_unitTypeName"))
@@ -2043,6 +2053,7 @@ def parse_replay(path: Path) -> ReplaySummary:
             raise
 
         summary.raw_event_counts["tracker_events"] = tracker_count
+        summary.defense_events = defenses.finish(players, lambda pid: _pid_to_player(players, pid))
         summary.raw_event_counts["player_stats_events"] = player_stats_event_count
         summary.raw_event_counts["resource_fields_seen"] = len(resource_fields_seen)
         commit_team_peaks()
@@ -2095,6 +2106,7 @@ def parse_replay(path: Path) -> ReplaySummary:
         _apply_leave_based_results(summary)
         _finish_food(summary)
         _build_team_stats(summary)
+        summary.defense_findings = defense_findings(summary)
         summary.fights = _build_fights(
             hostile_deaths, {t.team_id: f"Team {t.team_id} ({', '.join(t.players)})" for t in summary.teams})
         for team in summary.teams:
