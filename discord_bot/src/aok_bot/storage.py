@@ -66,18 +66,6 @@ def _escape_like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-# Aggregates count only replays that parsed fully; partial counters from failed parses are unreliable.
-SUCCESSFUL_PLAYERS = "replay_players p JOIN replays r ON r.id = p.replay_id AND r.parser_ok = 1"
-
-
-def _ratio(numerator: int, denominator: int) -> float | None:
-    return round(numerator / denominator, 3) if denominator else None
-
-
-def _escape_like(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
 class Storage:
     def __init__(self, db_path: Path):
         self.db_path = db_path

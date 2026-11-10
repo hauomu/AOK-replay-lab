@@ -37,7 +37,7 @@ def main() -> None:
     if not snap_path.exists() or snap_path.stat().st_size == 0:
         raise SystemExit(f"Missing {snap_path}. Run ingest first.")
     df = pd.read_csv(snap_path)
-    df = df[df["result"].notna()].copy()
+    df = df[df["result"].isin(["Win", "Loss"])].copy()  # labelled replays only
     df["is_win"] = (df["result"] == "Win").astype(int)
     features = [f for f in FEATURES if f in df.columns]
     X = df[features].fillna(0)
@@ -46,8 +46,14 @@ def main() -> None:
     if len(df) < 30 or y.nunique() < 2:
         raise SystemExit("Not enough parsed labeled snapshot rows to train a useful model yet.")
 
-    stratify = y if y.value_counts().min() >= 2 else None
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=stratify)
+    # Split by replay: rows from one match (players, repeated snapshots) must not
+    # land in both training and holdout sets.
+    from sklearn.model_selection import GroupShuffleSplit
+    groups = df["replay_id"]
+    if groups.nunique() < 4:
+        raise SystemExit("Not enough distinct labelled replays to hold some out for testing.")
+    train_idx, test_idx = next(GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=42).split(X, y, groups))
+    X_train, X_test, y_train, y_test = X.iloc[train_idx], X.iloc[test_idx], y.iloc[train_idx], y.iloc[test_idx]
 
     tree = DecisionTreeClassifier(max_depth=args.max_depth, min_samples_leaf=8, random_state=42)
     tree.fit(X_train, y_train)

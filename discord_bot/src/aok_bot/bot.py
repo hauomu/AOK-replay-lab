@@ -140,7 +140,9 @@ async def aok_recent(interaction: discord.Interaction, limit: int = 5):
 
     lines = []
     for idx, lobby in enumerate(lobbies[:limit], start=1):
-        title = lobby.get("map", {}).get("name") or lobby.get("mapName") or "Age of Knights"
+        if not isinstance(lobby, dict):
+            continue
+        title = (lobby.get("map") or {}).get("name") or lobby.get("mapName") or "Age of Knights"
         status = lobby.get("status") or lobby.get("extModStatus") or "unknown"
         opened = lobby.get("createdAt") or lobby.get("openedAt") or lobby.get("startedAt") or "unknown time"
         closed = lobby.get("closedAt") or lobby.get("completedAt") or ""
@@ -172,6 +174,8 @@ async def aok_analyze(interaction: discord.Interaction, replay: discord.Attachme
 
 
 MAX_ATTACHMENTS = 10  # Discord's per-message file limit.
+# Interaction tokens expire after 15 minutes; stop starting new replays well before.
+JOB_BUDGET_SECONDS = 12 * 60
 
 PUBLIC_WARNINGS = (
     ("Compatibility decoder:", "A corpus-validated compatibility decoder was used."),
@@ -194,8 +198,13 @@ async def _analyze_job(interaction, replay, mode):
         await interaction.response.defer(thinking=True)
         upload_path = await save_attachment(replay)
         paths = await owned_thread(extract_replay_paths, upload_path, settings.replays_dir, settings.input_limits)
-        completed, failed, unsaved = [], 0, 0
+        completed, failed, unsaved, skipped = [], 0, 0, 0
+        loop = asyncio.get_running_loop()
+        started = loop.time()
         for path in paths:
+            if loop.time() - started > JOB_BUDGET_SECONDS:
+                skipped += 1
+                continue
             try:
                 summary = await owned_thread(parse_replay_isolated, path)
                 public_warnings = list(dict.fromkeys(_public_warning(w) for w in summary.warnings))
@@ -205,7 +214,7 @@ async def _analyze_job(interaction, replay, mode):
                 failed += 1
                 continue
             try:
-                storage.save_replay(summary)
+                await asyncio.to_thread(storage.save_replay, summary)
             except Exception:
                 unsaved += 1
             completed.append((public, report))
@@ -218,11 +227,21 @@ async def _analyze_job(interaction, replay, mode):
         message = f"Generated {len(completed)} report(s); {ok} analyzed successfully; {failed} failed."
         if unsaved:
             message += f" {unsaved} report(s) could not be saved to history."
+        if skipped:
+            message += f" {skipped} replay(s) were skipped to stay within Discord's time limit; upload them separately."
         if len(completed) > MAX_ATTACHMENTS:
             message += f" Only the first {MAX_ATTACHMENTS} reports are attached."
-        attachments = [discord.File(report) for _, report in completed[:MAX_ATTACHMENTS]]
+        reports = [report for _, report in completed[:MAX_ATTACHMENTS]]
+        attachments = [discord.File(report) for report in reports]
         try:
             await interaction.followup.send(message, embed=embed, files=attachments,
+                                            allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            # A rejected embed must not cost the user the reports: resend without it.
+            for attachment in attachments:
+                attachment.close()
+            attachments = [discord.File(report) for report in reports]
+            await interaction.followup.send(message, files=attachments,
                                             allowed_mentions=discord.AllowedMentions.none())
         finally:
             for attachment in attachments:
@@ -237,7 +256,12 @@ async def _analyze_job(interaction, replay, mode):
 @tree.command(name="aok_player", description="Show local profile stats for a player from uploaded replays.")
 @app_commands.describe(name="Player name or partial name")
 async def aok_player(interaction: discord.Interaction, name: str):
-    profile = await asyncio.to_thread(storage.player_profile, name)
+    await interaction.response.defer(thinking=True)
+    try:
+        profile = await asyncio.to_thread(storage.player_profile, name)
+    except Exception:
+        await interaction.followup.send("Could not read the replay history. Please try again later.")
+        return
     if profile["games"] == 0:
         matches = profile.get("matches") or []
         if len(matches) > 1:
@@ -245,7 +269,7 @@ async def aok_player(interaction: discord.Interaction, name: str):
             message = f"Several players match that name; use the full name: {shown}"
         else:
             message = "No local replay stats found for that player yet."
-        await interaction.response.send_message(discord.utils.escape_mentions(message)[:1900])
+        await interaction.followup.send(discord.utils.escape_mentions(message)[:1900])
         return
 
     lines = [
@@ -260,14 +284,19 @@ async def aok_player(interaction: discord.Interaction, name: str):
         f"Avg APM: **{profile['avg_apm']}**",
         f"Results: `{profile['results']}`",
     ]
-    await interaction.response.send_message(discord.utils.escape_mentions("\n".join(lines)))
+    await interaction.followup.send(discord.utils.escape_mentions("\n".join(lines))[:1900])
 
 
 @tree.command(name="aok_leaderboard", description="Show local leaderboard from uploaded replays.")
 async def aok_leaderboard(interaction: discord.Interaction):
-    rows = await asyncio.to_thread(storage.leaderboard, 10)
+    await interaction.response.defer(thinking=True)
+    try:
+        rows = await asyncio.to_thread(storage.leaderboard, 10)
+    except Exception:
+        await interaction.followup.send("Could not read the replay history. Please try again later.")
+        return
     if not rows:
-        await interaction.response.send_message("No local replay stats yet. Upload replays with `/aok_analyze`.")
+        await interaction.followup.send("No local replay stats yet. Upload replays with `/aok_analyze`.")
         return
 
     lines = ["**AoK local replay leaderboard**"]
@@ -278,7 +307,7 @@ async def aok_leaderboard(interaction: discord.Interaction):
             f"animals {r.get('animal_kills', 0)}/{r.get('deaths_to_animals', 0)}, "
             f"avg APM {r['avg_apm']}"
         )
-    await interaction.response.send_message(discord.utils.escape_mentions("\n".join(lines))[:1900])
+    await interaction.followup.send(discord.utils.escape_mentions("\n".join(lines))[:1900])
 
 
 def main() -> None:

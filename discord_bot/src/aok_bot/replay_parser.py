@@ -27,6 +27,7 @@ SNAPSHOT_SECONDS = 5 * 60
 STRUCTURE_HINTS = (
     "House", "Farm", "Barracks", "Stable", "Archery", "Blacksmith", "Market", "Mill",
     "Lumber", "Mine", "Tower", "Castle", "Gate", "Wall", "Post", "Keep", "Town", "Hall",
+    "Workshop", "AlchemistsLab",
 )
 STATIC_DEFENSE_HINTS = (
     "Wall", "Gate", "Tower", "WatchPost", "GuardPost", "GuardTower", "Castle", "Keep",
@@ -633,15 +634,15 @@ END_EXIT_SECONDS = 11
 
 
 def _apply_leave_based_results(summary: ReplaySummary) -> None:
-    """Infer losses/wins from leave events.
+    """Turn replay metadata plus leave events into results.
 
-    AoK displays often leave `m_result` as Undecided even though the practical
-    result is obvious: in team games, a side is eliminated when every player on
-    that side has left; in FFA/no-alliance games, a player who leaves has lost.
-
-    This function does not demote an official replay `Win`. It only upgrades
-    weak/undecided metadata into `Loss` or `Win` when leave events make the
-    outcome clearer.
+    SC2 marks every player still present at the end as Win, so Win on more
+    than one side (or on several FFA players) names no winner and is dropped.
+    Otherwise metadata Win is kept. Leave events then decide what they can:
+    a side that has fully left lost; in FFA a player who left lost. Computer
+    slots never leave and are ignored. Leave inference is skipped when the
+    game-event stream (which carries the leave events) was cut short, and
+    needs at least two sides.
     """
     if not summary.players:
         return
@@ -654,90 +655,103 @@ def _apply_leave_based_results(summary: ReplaySummary) -> None:
     if not grouped:
         return
 
-    official_winners = [p for p in summary.players if p.result == "Win"]
+    end = summary.duration_seconds
+    cutoff = end - END_EXIT_SECONDS if end else None
+    leaves_known = summary.game_events_complete is not False
+
+    def humans(players: list[PlayerStats]) -> list[PlayerStats]:
+        return [p for p in players if not p.is_computer]
+
+    def gone(p: PlayerStats, before_cutoff: bool = False) -> bool:
+        if p.leave_time_seconds is None:
+            return False
+        return not before_cutoff or cutoff is None or p.leave_time_seconds < cutoff
+
+    def side_gone(players: list[PlayerStats], before_cutoff: bool = False) -> bool:
+        people = humans(players)
+        return bool(people) and all(gone(p, before_cutoff) for p in people)
+
+    if any(p.result == "Win" for p in summary.players):
+        summary.result_source = "recorded"
 
     if summary.match_mode == "Free-for-all":
-        for player in summary.players:
-            if player.leave_time_seconds is not None and player.result != "Win":
+        if sum(p.result == "Win" for p in summary.players) > 1:
+            for player in summary.players:
+                if player.result == "Win":
+                    player.result = "Undecided"
+            summary.result_source = None
+            summary.key_findings.append(
+                "Replay metadata marks more than one FFA player as Win (players still present at the end), "
+                "so it does not identify a winner."
+            )
+        if not leaves_known:
+            summary.key_findings.append("Game events were incomplete, so leave events were not used to infer results.")
+            return
+        official_winners = [p for p in summary.players if p.result == "Win"]
+        for player in humans(summary.players):
+            if gone(player) and player.result != "Win":
                 player.result = "Loss"
 
         if not official_winners:
-            survivors = [p for p in summary.players if p.result != "Loss"]
-            if len(survivors) == 1:
+            survivors = [p for p in humans(summary.players) if p.result != "Loss"]
+            if len(survivors) == 1 and len(humans(summary.players)) > 1:
                 survivors[0].result = "Win"
+                summary.result_source = "leaves"
                 summary.key_findings.append(
                     f"Leave-based result inference: {survivors[0].name} is the only FFA side that did not leave, so they are treated as the winner."
                 )
-            elif len(survivors) == 0:
+            elif not survivors:
                 summary.key_findings.append(
                     "Leave-based result inference: every FFA side has a leave event, so the report keeps the official winner as unknown instead of inventing a winner."
                 )
         return
 
-    # SC2 marks every player still in the game at the end as Win, so an AoK
-    # game ended with both sides present can record Win on opposing teams.
-    # That metadata names no winner. Only a side that had fully left before
-    # the closing exits (everyone quits in the last seconds) counts as beaten.
+    # Team/duel mode.
     win_sides = [tid for tid, ps in grouped.items() if any(p.result == "Win" for p in ps)]
-    if len(win_sides) > 1:
-        end = summary.duration_seconds
-        cutoff = end - END_EXIT_SECONDS if end else None
-        beaten = [
-            tid for tid, ps in grouped.items()
-            if all(p.leave_time_seconds is not None and (cutoff is None or p.leave_time_seconds < cutoff) for p in ps)
-        ]
+    # Contradictory metadata means players were present at the end, so their
+    # exits are post-game: only exits before the closing window count.
+    contradictory = len(win_sides) > 1
+    if contradictory:
         for player in summary.players:
             player.result = "Undecided"
-        if len(beaten) == len(grouped) - 1:
-            for tid, ps in grouped.items():
-                for player in ps:
-                    player.result = "Loss" if tid in beaten else "Win"
-            winner = next(tid for tid in grouped if tid not in beaten)
-            summary.key_findings.append(
-                "Replay metadata marks players on more than one side as Win; "
-                f"Team {winner} is the only side not fully gone before the end, so it is treated as the winner."
-            )
-        else:
-            summary.key_findings.append(
-                "Replay metadata marks players on more than one side as Win (players still present at the end), "
-                "so no winner is recorded."
-            )
-            _infer_likely_winner(summary, grouped)
+        summary.result_source = None
+        summary.key_findings.append(
+            "Replay metadata marks players on more than one side as Win (players still present at the end), "
+            "so it does not identify a winner."
+        )
+    elif len(win_sides) == 1:
+        return  # one recorded winning side: keep the metadata
+
+    if len(grouped) < 2:
+        return
+    if not leaves_known:
+        summary.key_findings.append("Game events were incomplete, so leave events were not used to infer a winner.")
         return
 
-    # Team/duel mode: a side loses once every player on that side has left.
-    side_all_left: dict[int, bool] = {
-        team_id: bool(players) and all(p.leave_time_seconds is not None for p in players)
-        for team_id, players in grouped.items()
-    }
-
-    for team_id, all_left in side_all_left.items():
-        if not all_left:
-            continue
-        team_players = grouped[team_id]
-        if any(p.result == "Win" for p in team_players):
-            continue
-        for player in team_players:
-            player.result = "Loss"
-        summary.key_findings.append(
-            f"Leave-based result inference: Team {team_id} ({', '.join(p.name for p in team_players)}) all left, so that side is treated as a loss."
-        )
-
-    if not official_winners:
-        non_losing_team_ids = [
-            team_id
-            for team_id, players in grouped.items()
-            if not all(p.result == "Loss" for p in players)
-        ]
-        if len(non_losing_team_ids) == 1:
-            winning_team_id = non_losing_team_ids[0]
-            for player in grouped[winning_team_id]:
-                _set_result_if_weaker(player, "Win")
+    # A side whose people have all left lost. If every side has emptied, the
+    # closing exits are just players quitting after the end: only exits before
+    # the closing window count then.
+    beaten = [tid for tid, ps in grouped.items() if side_gone(ps, before_cutoff=contradictory)]
+    if len(beaten) == len(grouped):
+        beaten = [tid for tid, ps in grouped.items() if side_gone(ps, before_cutoff=True)]
+    if beaten and len(beaten) < len(grouped):
+        for tid in beaten:
+            for player in grouped[tid]:
+                player.result = "Loss"
             summary.key_findings.append(
-                f"Leave-based result inference: Team {winning_team_id} is the only side not fully eliminated by leave events, so it is treated as the winning side."
+                f"Leave-based result inference: Team {tid} ({', '.join(p.name for p in grouped[tid])}) all left, so that side is treated as a loss."
             )
-        else:
-            _infer_likely_winner(summary, grouped)
+        remaining = [tid for tid in grouped if tid not in beaten]
+        if len(remaining) == 1:
+            for player in grouped[remaining[0]]:
+                player.result = "Win"
+            summary.result_source = "leaves"
+            summary.key_findings.append(
+                f"Leave-based result inference: Team {remaining[0]} is the only side not fully gone, so it is treated as the winning side."
+            )
+        return
+
+    _infer_likely_winner(summary, grouped)
 
 
 def _infer_likely_winner(summary: ReplaySummary, grouped: dict[int, list[PlayerStats]]) -> None:
@@ -758,7 +772,8 @@ def _infer_likely_winner(summary: ReplaySummary, grouped: dict[int, list[PlayerS
     def gone(p: PlayerStats) -> bool:
         return p.leave_time_seconds is not None and (cutoff is None or p.leave_time_seconds < cutoff)
 
-    share = {tid: sum(gone(p) for p in ps) / len(ps) for tid, ps in grouped.items() if ps}
+    people = {tid: [p for p in ps if not p.is_computer] for tid, ps in grouped.items()}
+    share = {tid: sum(gone(p) for p in ps) / len(ps) for tid, ps in people.items() if ps}
     if len(share) != 2:
         return
     winner, loser = sorted(share, key=share.get)
@@ -770,10 +785,10 @@ def _infer_likely_winner(summary: ReplaySummary, grouped: dict[int, list[PlayerS
     for player in grouped[loser]:
         if player.result in (None, "", "Undecided"):
             player.result = "Likely loss"
-    gone_count = {tid: sum(gone(p) for p in grouped[tid]) for tid in (winner, loser)}
+    gone_count = {tid: sum(gone(p) for p in people[tid]) for tid in (winner, loser)}
     summary.key_findings.append(
-        f"Likely result (not recorded in the replay): Team {loser} had {gone_count[loser]} of {len(grouped[loser])} "
-        f"player(s) gone before the end versus {gone_count[winner]} of {len(grouped[winner])} on Team {winner}, "
+        f"Likely result (not recorded in the replay): Team {loser} had {gone_count[loser]} of {len(people[loser])} "
+        f"player(s) gone before the end versus {gone_count[winner]} of {len(people[winner])} on Team {winner}, "
         f"so Team {winner} is treated as the likely winner."
     )
 
@@ -783,16 +798,30 @@ def _merge_earliest(target: dict[str, int], source: dict[str, int]) -> None:
             target[key] = int(seconds)
 
 
+# A side's result is its strongest player result, independent of player order.
+_TEAM_RESULT_ORDER = {"Win": 6, "Loss": 5, "Tie": 4, "Likely win": 3, "Likely loss": 2, "Undecided": 1}
+
+
+def _player_average_rates(summary: ReplaySummary, p: PlayerStats) -> None:
+    # A leaver's slot can keep collecting (shared control), so average over
+    # whichever is later: leaving or the last resource gain.
+    active_seconds = max(p.leave_time_seconds or 0, p.resource_last_gain_seconds or 0)
+    active_seconds = active_seconds or summary.duration_seconds or 0
+    for resource in ("gold", "wood", "iron"):
+        if active_seconds > 0:
+            p.resource_average_rate[resource] = round(
+                int(p.resource_gathered_estimate.get(resource, 0) or 0) * 60 / active_seconds)
+
+
 def _build_team_stats(summary: ReplaySummary) -> None:
     teams: dict[int, TeamStats] = {}
     for p in summary.players:
+        _player_average_rates(summary, p)
         if p.team_id is None:
             continue
         team = teams.setdefault(int(p.team_id), TeamStats(team_id=int(p.team_id)))
         team.players.append(p.name)
-        if p.result == "Win":
-            team.result = "Win"
-        elif team.result != "Win" and p.result:
+        if _TEAM_RESULT_ORDER.get(p.result, 0) > _TEAM_RESULT_ORDER.get(team.result, 0):
             team.result = p.result
         team.kills += p.kills
         team.losses += p.losses
@@ -828,13 +857,6 @@ def _build_team_stats(summary: ReplaySummary) -> None:
             team.resource_peak_current[resource] += int(p.resource_peak_current.get(resource, 0) or 0)
             team.resource_peak_collection_rate[resource] += int(p.resource_peak_collection_rate.get(resource, 0) or 0)
             team.resource_gathered_estimate[resource] += int(p.resource_gathered_estimate.get(resource, 0) or 0)
-            # A leaver's slot can keep collecting (shared control), so average
-            # over whichever is later: leaving or the last resource gain.
-            active_seconds = max(p.leave_time_seconds or 0, p.resource_last_gain_seconds or 0)
-            active_seconds = active_seconds or summary.duration_seconds or 0
-            if active_seconds > 0:
-                p.resource_average_rate[resource] = round(
-                    int(p.resource_gathered_estimate.get(resource, 0) or 0) * 60 / active_seconds)
             team.resource_average_rate[resource] += p.resource_average_rate[resource]
             team.resource_lost_value[resource] += int(p.resource_lost_value.get(resource, 0) or 0)
 
@@ -1035,10 +1057,14 @@ def _build_match_story(summary: ReplaySummary) -> None:
             elif opponents:
                 # Recorded outcome plus measured sizes only; replay counters do not establish why a side won.
                 biggest_opp = max(opponents, key=lambda t: len(t.players))
+                inferred = summary.result_source == "leaves"
                 summary.verdict = (
-                    f"Recorded winner: {_team_display(winner, match_mode=summary.match_mode)} ({len(winner.players)} player(s) versus "
+                    ("Winner inferred from leave events: " if inferred else "Recorded winner: ")
+                    + f"{_team_display(winner, match_mode=summary.match_mode)} ({len(winner.players)} player(s) versus "
                     f"{len(biggest_opp.players)} on the largest opposing side; heuristic style label: "
-                    f"{winner.style_label or 'mixed'}). The replay records the outcome, not its causes."
+                    f"{winner.style_label or 'mixed'}). "
+                    + ("Every player on the other side left, which ends the game. " if inferred else "")
+                    + "The replay records the outcome, not its causes."
                 )
             else:
                 summary.verdict = f"{_team_display(winner, match_mode=summary.match_mode)} is detected as the winning side."
@@ -1270,7 +1296,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                 result_code,
                 str(result_code) if result_code is not None else None,
             )
-            players.append(PlayerStats(name=name, team_id=team_id, result=result))
+            players.append(PlayerStats(name=name, team_id=team_id, result=result, is_computer=p.get("m_control") == 3))
         summary.players = players
         _normalize_match_mode(summary)
 
@@ -1318,8 +1344,6 @@ def parse_replay(path: Path) -> ReplaySummary:
             player.camera_events = int(camera_counts.get(uid, 0))
             player.chat_messages = int(chat_counts.get(uid, 0))
             player.pings = int(ping_counts.get(uid, 0))
-            if summary.duration_seconds and summary.duration_seconds > 0 and summary.game_events_complete:
-                player.apm = int(round(player.commands / (summary.duration_seconds / 60)))
 
         # Tracker events: units, buildings, losses, PvP kills, technology,
         # Player 15/animal interactions, and resource snapshots.
@@ -1338,6 +1362,15 @@ def parse_replay(path: Path) -> ReplaySummary:
         gather_history: dict[int, dict[str, deque[tuple[int, int]]]] = defaultdict(dict)
         starting_stock: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
         team_peak_rate: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        last_stats_loop: list[int | None] = [None]
+
+        def commit_team_peaks() -> None:
+            # Called between game loops, so every player's sample for the
+            # previous loop is in: no mixing of old and new player rates.
+            for team_id, state in team_timeline_state.items():
+                for resource in ("gold", "wood", "iron"):
+                    team_peak_rate[team_id][resource] = max(
+                        team_peak_rate[team_id][resource], int(state.get(f"{resource}_rate", 0) or 0))
 
         team_timeline_state: dict[int, dict[str, Any]] = defaultdict(
             lambda: {
@@ -1370,7 +1403,6 @@ def parse_replay(path: Path) -> ReplaySummary:
             for resource in ("gold", "wood", "iron"):
                 state[resource] = sum(int(p.resource_current.get(resource, 0) or 0) for p in members)
                 state[f"{resource}_rate"] = sum(int(p.resource_collection_rate.get(resource, 0) or 0) for p in members)
-                team_peak_rate[team_id][resource] = max(team_peak_rate[team_id][resource], state[f"{resource}_rate"])
             age_player = max(members, key=lambda p: p.age_stage(), default=None)
             state["age"] = age_player.current_age() if age_player else "Starting age"
             state["tech_score"] = _side_frontier_tech_score(members)
@@ -1510,6 +1542,14 @@ def parse_replay(path: Path) -> ReplaySummary:
                         owner = _pid_to_player(players, owner_pid)
                         record_advanced_and_mechanical(owner, owner_pid, unit_tag, new_type, event_seconds)
 
+                elif event_name == "NNet.Replay.Tracker.SUnitOwnerChangeEvent":
+                    unit_tag = _tag(event)
+                    new_pid = event.get("m_controlPlayerId") or event.get("m_upkeepPlayerId")
+                    if unit_tag and new_pid:
+                        tag_owner[unit_tag] = int(new_pid)
+                        if unit_tag in pending_init:
+                            pending_init[unit_tag] = (int(new_pid), pending_init[unit_tag][1])
+
                 elif event_name == "NNet.Replay.Tracker.SUnitDiedEvent":
                     unit_tag = _tag(event)
                     owner_pid = event.get("m_unitOwnerPlayerId") or (tag_owner.get(unit_tag) if unit_tag else None)
@@ -1546,7 +1586,16 @@ def parse_replay(path: Path) -> ReplaySummary:
                                 team_timeline_state[int(owner.team_id)]["deaths_to_animals"] += 1
                         continue
 
-                    if owner:
+                    killer = _pid_to_player(players, killer_pid)
+                    hostile = bool(
+                        killer and owner and killer is not owner
+                        and (killer.team_id is None or owner.team_id is None or killer.team_id != owner.team_id)
+                    )
+                    if owner and not hostile:
+                        # Own/allied kill, map-spawned or environmental death: not PvP.
+                        owner.other_losses += 1
+                        _increment(owner.unit_loss_counts, unit_type)
+                    if owner and hostile:
                         owner.losses += 1
                         _increment(owner.unit_loss_counts, unit_type)
                         if unit_type in MECHANICAL_UNIT_LABELS:
@@ -1560,9 +1609,8 @@ def parse_replay(path: Path) -> ReplaySummary:
                             team_timeline_state[int(owner.team_id)]["losses"] += 1
                         refresh_side_state(owner)
 
-                    killer = _pid_to_player(players, killer_pid)
-                    # Avoid counting suicides/environment/no-player/animal kills as PvP kills.
-                    if killer and owner and killer is not owner:
+                    # PvP kills: a hostile player's unit killed by this player.
+                    if hostile:
                         killer.kills += 1
                         killer_unit_type = tag_type.get(_killer_tag(event), "UnknownKillerUnit")
                         _increment(killer.unit_kill_counts, killer_unit_type)
@@ -1589,6 +1637,9 @@ def parse_replay(path: Path) -> ReplaySummary:
 
                 elif event_name == "NNet.Replay.Tracker.SPlayerStatsEvent":
                     player_stats_event_count += 1
+                    if last_stats_loop[0] is not None and loop != last_stats_loop[0]:
+                        commit_team_peaks()
+                    last_stats_loop[0] = loop
                     pid = event.get("m_playerId")
                     if _is_animal_pid(pid):
                         continue
@@ -1609,9 +1660,14 @@ def parse_replay(path: Path) -> ReplaySummary:
         summary.raw_event_counts["tracker_events"] = tracker_count
         summary.raw_event_counts["player_stats_events"] = player_stats_event_count
         summary.raw_event_counts["resource_fields_seen"] = len(resource_fields_seen)
+        commit_team_peaks()
         if max_tracker_loop and (summary.duration_seconds is None or secs(max_tracker_loop) > summary.duration_seconds):
             summary.duration_seconds = secs(max_tracker_loop)
         snapshot_until(summary.duration_seconds)
+        # APM after the duration is final (tracker events can extend it).
+        for player in players:
+            if summary.duration_seconds and summary.duration_seconds > 0 and summary.game_events_complete:
+                player.apm = int(round(player.commands / (summary.duration_seconds / 60)))
 
         summary.resource_channels_seen = sorted(resource_channels_seen, key=lambda key: ("gold", "wood", "iron").index(key))
         summary.resource_tracking_notes.append(

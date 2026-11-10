@@ -41,6 +41,7 @@ def mine_strategies(output_dir: Path) -> dict[str, Path]:
     written: dict[str, Path] = {}
 
     if not pstats.empty:
+        pstats = pstats[pstats["result"].isin(["Win", "Loss"])].copy()  # labelled replays only
         pstats["is_win"] = (pstats["result"] == "Win").astype(int)
         role_summary = pstats.groupby("role_label", dropna=False).agg(
             samples=("replay_id", "count"),
@@ -109,6 +110,7 @@ def mine_strategies(output_dir: Path) -> dict[str, Path]:
         written["timing_windows"] = path
 
     if not tstats.empty:
+        tstats = tstats[tstats["result"].isin(["Win", "Loss"])].copy()  # labelled replays only
         tstats["is_win"] = (tstats["result"] == "Win").astype(int)
         team_style = tstats.groupby("style_label", dropna=False).agg(
             samples=("replay_id", "count"),
@@ -129,6 +131,7 @@ def mine_strategies(output_dir: Path) -> dict[str, Path]:
         written["team_style_summary"] = path
 
     if not snaps.empty:
+        snaps = snaps[snaps["result"].isin(["Win", "Loss"])].copy()  # labelled replays only
         snaps["is_win"] = (snaps["result"] == "Win").astype(int)
         features = [
             "kills_to_now", "losses_to_now", "units_born_to_now", "structures_done_to_now",
@@ -151,7 +154,11 @@ def mine_strategies(output_dir: Path) -> dict[str, Path]:
                     "winner_75pct": round(float(winners.quantile(0.75)), 2),
                     "nonwinner_75pct": round(float(others.quantile(0.75)), 2),
                 })
-        snap_signals = pd.DataFrame(rows).sort_values(["snapshot_minute", "difference_winner_minus_nonwinner"], ascending=[True, False])
+        signal_columns = ["snapshot_minute", "feature", "winner_median", "nonwinner_median",
+                          "difference_winner_minus_nonwinner", "winner_75pct", "nonwinner_75pct"]
+        # One outcome class only (or no labels) leaves no comparisons: write an empty table.
+        snap_signals = pd.DataFrame(rows, columns=signal_columns).sort_values(
+            ["snapshot_minute", "difference_winner_minus_nonwinner"], ascending=[True, False])
         path = analysis / "snapshot_win_signals.csv"
         snap_signals.to_csv(path, index=False)
         written["snapshot_win_signals"] = path
