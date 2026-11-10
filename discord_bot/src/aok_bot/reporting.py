@@ -883,7 +883,7 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 
 - This reads replay protocol events, not a video recording.
 - Player 15 is treated as Animals/Neutral because AoK assigns animals to that player slot.
-- PvP K/L excludes animal kills; animal K/D is tracked separately.
+- PvP K/L counts only deaths caused by a hostile player and excludes animal kills (tracked separately); deaths to allies, map-spawned units and the environment are not PvP losses.
 - Exact age costs and hard prerequisite chains still need AoK map metadata or TwoDie confirmation; inferred relationships are labelled as such.
 - FFA/no-alliance games are split into one analysis side per player; team games still aggregate allied players.
 - Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while gathering), because AoK leaves SC2's collection-rate field at 0. Starting stock is excluded; market trades count as income in the bought resource.
@@ -903,14 +903,35 @@ def _side_roster_lines(summary: ReplaySummary) -> list[str]:
     return [f"{_team_label(t)} = {', '.join(t.players) if t.players else 'unknown players'}" for t in _sort_teams_for_report(summary)]
 
 
+EMBED_TOTAL_BUDGET = 5900  # Discord rejects embeds over 6000 characters.
+EMBED_TITLE_MAX = 256
+
+
+def _fit_embed(embed: discord.Embed) -> discord.Embed:
+    """Keep the embed inside Discord's limits by dropping the last (lowest-priority) fields."""
+    def total() -> int:
+        return len(embed.title or "") + sum(len(f.name) + len(f.value) for f in embed.fields)
+
+    while embed.fields and (total() > EMBED_TOTAL_BUDGET or len(embed.fields) > 25):
+        embed.remove_field(len(embed.fields) - 1)
+    return embed
+
+
 def make_match_embed(summary: ReplaySummary) -> discord.Embed:
-    title = summary.map_name or "AoK Replay Analysis"
+    title = (summary.map_name or "AoK Replay Analysis")[:EMBED_TITLE_MAX]
     colour = discord.Colour.green() if summary.parser_ok else discord.Colour.orange()
     embed = discord.Embed(title=title, colour=colour)
+    if not summary.parser_ok:
+        # Same diagnostic-only behaviour as the failed Markdown report: no result claims.
+        embed.add_field(name="Parser", value="limited", inline=True)
+        embed.add_field(name="Winner", value="Unknown (replay could not be fully analyzed)", inline=True)
+        if summary.warnings:
+            embed.add_field(name="Warnings", value="\n".join(summary.warnings[:3])[:1024], inline=False)
+        return _fit_embed(embed)
     embed.add_field(name="Duration", value=summary.duration_label(), inline=True)
     embed.add_field(name="Players", value=str(len(summary.players)) if summary.players else "unknown", inline=True)
     embed.add_field(name="Mode", value=summary.match_mode, inline=True)
-    embed.add_field(name="Winner", value=summary.winner_display(), inline=True)
+    embed.add_field(name="Winner", value=summary.winner_display()[:1024], inline=True)
     embed.add_field(name="Parser", value="OK" if summary.parser_ok else "limited", inline=True)
 
     side_rosters = _side_roster_lines(summary)
@@ -978,7 +999,7 @@ def make_match_embed(summary: ReplaySummary) -> discord.Embed:
     if summary.warnings:
         embed.add_field(name="Warnings", value="\n".join(summary.warnings[:3])[:1024], inline=False)
 
-    return embed
+    return _fit_embed(embed)
 
 
 def _analysis_markdown(summary: ReplaySummary, mode: str) -> str:
@@ -1151,7 +1172,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
         "",
         "- This reads replay protocol events, not a video recording.",
         "- Player 15 is treated as Animals/Neutral because AoK assigns animals to that player slot.",
-        "- PvP K/L excludes animal kills; animal K/D is tracked separately.",
+        "- PvP K/L counts only deaths caused by a hostile player and excludes animal kills (tracked separately); deaths to allies, map-spawned units and the environment are not PvP losses.",
         "- Exact age costs and hard prerequisite chains still need AoK map metadata or TwoDie confirmation; inferred relationships are labelled as such.",
         "- FFA/no-alliance games are split into one analysis side per player; team games still aggregate allied players.",
         "- Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while gathering), because AoK leaves SC2's collection-rate field at 0. Starting stock is excluded; market trades count as income in the bought resource.",

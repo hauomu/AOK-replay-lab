@@ -24,6 +24,8 @@ class PlayerStats:
     name: str
     team_id: int | None = None
     result: str | None = None
+    # details.m_control: 2 = human, 3 = computer. Computers never leave.
+    is_computer: bool = False
     apm: int | None = None
     commands: int = 0
     control_groups: int = 0
@@ -35,6 +37,9 @@ class PlayerStats:
     # the combat read does not get inflated by clearing neutral camps.
     kills: int = 0
     losses: int = 0
+    # Deaths not caused by a hostile player: own/allied kills, map-spawned
+    # units, environment. Kept out of PvP K/L.
+    other_losses: int = 0
 
     # Player 15 / neutral-animal interaction stats.
     animal_kills: int = 0
@@ -237,6 +242,8 @@ class ReplaySummary:
 
     # Summary-first analysis fields used by /aok_analyze.
     verdict: str | None = None
+    # "recorded" (replay metadata), "leaves" (a whole side left) or None.
+    result_source: str | None = None
     turning_points: list[str] = field(default_factory=list)
     team_evaluations: list[str] = field(default_factory=list)
     animal_impact: list[str] = field(default_factory=list)

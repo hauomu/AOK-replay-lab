@@ -27,20 +27,14 @@ from aok_bot.match_rules import normalize_match_groups
 from aok_bot.match_rules import user_player_indices
 from aok_bot.protocols import select_protocol
 
-STRUCTURE_HINTS = (
-    "House", "Farm", "Barracks", "Stable", "Archery", "Blacksmith", "Market", "Mill",
-    "Lumber", "Mine", "Tower", "Castle", "Gate", "Wall", "Post", "Keep", "Town", "Hall",
+# Shared with the bot so both classify units the same way (exact mechanical
+# names: HandCannoneer is ranged, not siege).
+from aok_bot.replay_parser import (  # noqa: E402
+    CASTLE_HINTS, CAVALRY_HINTS, ECON_HINTS, INFANTRY_HINTS, MECHANICAL_UNIT_LABELS,
+    NON_COMBAT_HINTS, RANGED_HINTS, STATIC_DEFENSE_HINTS, STRUCTURE_HINTS, WALL_GATE_HINTS,
 )
-STATIC_DEFENSE_HINTS = ("Wall", "Gate", "Tower", "WatchPost", "GuardPost", "GuardTower", "Castle", "Keep")
-WALL_GATE_HINTS = ("Wall", "Gate")
-CASTLE_HINTS = ("Castle", "Keep")
-CAVALRY_HINTS = ("Horse", "Knight", "Cavalry", "Mounted", "Rider")
-RANGED_HINTS = ("Archer", "Crossbow", "HandCannoneer", "Gun", "Rifle", "Musk", "Bow")
-INFANTRY_HINTS = ("Swordsman", "Spearman", "Militia", "Pikeman", "Footman", "Infantry", "ManAtArms")
-SIEGE_HINTS = ("Ballista", "Bombard", "Catapult", "Trebuchet", "Siege", "Cannon")
-ECON_HINTS = ("House", "Farm", "Market", "Mill", "Lumber", "Mine", "TownHall", "Town", "Hall")
-PROD_HINTS = ("Barracks", "Stable", "Archery", "Blacksmith", "Castle", "TownHall", "Town", "Hall", "Market")
-NON_COMBAT_HINTS = ("Beacon", "Dummy", "Path", "Marker", "Cursor", "Camera", "Missile", "Projectile")
+
+PROD_HINTS = ("Barracks", "Stable", "Archery", "Blacksmith", "Castle", "TownHall", "Town", "Hall", "Market", "Workshop")
 
 SNAPSHOT_MINUTES = (5, 10, 15, 20, 25, 30, 45, 60)
 
@@ -126,7 +120,7 @@ def category_for_unit(unit_type: str) -> dict[str, int]:
         "is_cavalry": int(has_any(unit_type, CAVALRY_HINTS)),
         "is_ranged": int(has_any(unit_type, RANGED_HINTS)),
         "is_infantry": int(has_any(unit_type, INFANTRY_HINTS)),
-        "is_siege": int(has_any(unit_type, SIEGE_HINTS)),
+        "is_siege": int(unit_type in MECHANICAL_UNIT_LABELS),
         "is_econ": int(has_any(unit_type, ECON_HINTS)),
         "is_production": int(has_any(unit_type, PROD_HINTS)),
         "is_noise": int(has_any(unit_type, NON_COMBAT_HINTS)),
@@ -239,6 +233,17 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
         for player, group in zip(players, groups):
             player["team_id"] = group
             player["match_mode"] = ex.match_mode
+        # SC2 marks everyone present at the end as Win, so only a replay with Win
+        # on exactly one side has a usable label; its other sides lost. Anything
+        # else (no Win, Win on several sides) is "Unknown" and excluded from
+        # win/loss statistics.
+        win_sides = {p["team_id"] for p in players if p.get("result") == "Win" and p.get("team_id") is not None}
+        for player in players:
+            player["raw_result"] = player.get("result")
+            if len(win_sides) == 1 and player.get("team_id") is not None and not is_neutral_player(player):
+                player["result"] = "Win" if player["team_id"] in win_sides else "Loss"
+            else:
+                player["result"] = "Unknown"
         ex.players = players
 
         command_counts = Counter()
@@ -525,6 +530,8 @@ def build_snapshots(ex: ExtractedReplay) -> list[dict[str, Any]]:
         evs = [e for e in ex.unit_events if e.get("player_index") == idx
                or (e["event_type"] == "unit_died" and e.get("killer_player_index") == idx)]
         for m in SNAPSHOT_MINUTES:
+            if ex.duration_seconds is not None and m * 60 > ex.duration_seconds:
+                break  # no snapshots after the replay ended
             cutoff = m
             prior = [e for e in evs if float(e.get("minute") or 0) <= cutoff]
             row = {
@@ -556,6 +563,9 @@ def build_snapshots(ex: ExtractedReplay) -> list[dict[str, Any]]:
     return out
 
 
+MAX_ZIP_MEMBER_BYTES = 25 * 1024 * 1024
+
+
 def iter_replay_inputs(paths: list[Path]) -> Iterable[tuple[str, Path]]:
     """Yield (source_name, temp_or_real_path) for .SC2Replay files and replay ZIPs."""
     for p in paths:
@@ -566,12 +576,17 @@ def iter_replay_inputs(paths: list[Path]) -> Iterable[tuple[str, Path]]:
         elif p.suffix.lower() == ".sc2replay":
             yield p.name, p
         elif p.suffix.lower() == ".zip":
-            with zipfile.ZipFile(p) as zf:
+            with zipfile.ZipFile(p) as zf, tempfile.TemporaryDirectory(prefix="aok_zip_") as tmp_dir:
                 for info in zf.infolist():
                     if info.is_dir() or not info.filename.lower().endswith(".sc2replay"):
                         continue
-                    data = zf.read(info)
-                    tmp = Path(tempfile.gettempdir()) / f"aok_{hashlib.sha256(data).hexdigest()[:16]}.SC2Replay"
+                    if not 0 < info.file_size <= MAX_ZIP_MEMBER_BYTES:
+                        continue  # same per-replay cap as the bot's upload path
+                    with zf.open(info) as fh:
+                        data = fh.read(MAX_ZIP_MEMBER_BYTES + 1)
+                    if len(data) > MAX_ZIP_MEMBER_BYTES:
+                        continue
+                    tmp = Path(tmp_dir) / f"{hashlib.sha256(data).hexdigest()[:16]}.SC2Replay"
                     tmp.write_bytes(data)
                     yield f"{p.name}:{info.filename}", tmp
         else:
