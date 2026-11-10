@@ -262,6 +262,8 @@ class ReplaySummary:
     game_version: str | None = None
     decoder_build: str | None = field(default=None, kw_only=True)
     game_events_complete: bool | None = field(default=None, kw_only=True)
+    # Same game recorded or uploaded more than once shares this key (lobby seed + accounts).
+    game_key: str | None = field(default=None, kw_only=True)
     players: list[PlayerStats] = field(default_factory=list)
     teams: list[TeamStats] = field(default_factory=list)
     animal_stats: PlayerStats | None = None

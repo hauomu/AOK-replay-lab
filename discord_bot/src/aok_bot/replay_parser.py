@@ -221,6 +221,20 @@ def _account_handle(toon: Any) -> str | None:
     return f"{region}-{program}-{realm}-{account}"
 
 
+def game_key(initdata: Any, account_ids: list[str | None]) -> str | None:
+    """Identify one game across copies: every player's recording of a match
+    shares the lobby's random seed, and the account list guards against seed
+    collisions. None when the seed or any human account is missing."""
+    try:
+        seed = initdata["m_syncLobbyState"]["m_gameDescription"]["m_randomValue"]
+    except (KeyError, TypeError):
+        return None
+    accounts = [a for a in account_ids if a]
+    if seed is None or not accounts:
+        return None
+    return f"{int(seed)}:{','.join(sorted(accounts))}"
+
+
 def _decode_unit_type(value: Any) -> str:
     return (_safe_decode_string(value) or "UnknownUnit").strip() or "UnknownUnit"
 
@@ -1594,6 +1608,7 @@ def parse_replay(path: Path) -> ReplaySummary:
             players.append(PlayerStats(name=name, team_id=team_id, result=result, is_computer=is_computer,
                                        account_id=None if is_computer else _account_handle(p.get("m_toon"))))
         summary.players = players
+        summary.game_key = game_key(initdata, [p.account_id for p in players if not p.is_computer])
         _normalize_match_mode(summary)
 
         # Game events: commands, APM-ish proxy, pings, chat, control groups, leave timings.
