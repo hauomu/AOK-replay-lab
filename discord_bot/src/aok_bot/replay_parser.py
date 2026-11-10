@@ -248,10 +248,112 @@ def _cost_table_for(map_hash: str | None, title: str | None) -> tuple[dict[str, 
     return None, None, None
 
 
-def _add_costs(player: PlayerStats, costs: dict[str, int] | None, sign: int = 1) -> None:
+SPEND_CATEGORY_LABELS = {"Army": "Army", "Economy": "Economy", "Technology": "Buildings & defense"}
+SPEND_CATEGORIES = ("Army", "Economy", "Buildings & defense", "Research", "Ages")
+FIGHT_GAP_SECONDS = 25
+FIGHT_MIN_DEATHS = 6
+TOP_FIGHTS = 5
+SERIES_STEP_SECONDS = 30
+
+
+def _spend_category(unit_type: str, categories: dict[str, str]) -> str:
+    """Map category from the map's CostCategory; sensible defaults for the few untagged units."""
+    tagged = categories.get(unit_type)
+    if tagged in SPEND_CATEGORY_LABELS:
+        return SPEND_CATEGORY_LABELS[tagged]
+    if unit_type in MECHANICAL_UNIT_LABELS or "Siege" in unit_type:
+        return "Army"
+    if _is_structure(unit_type) or "Gate" in unit_type or "Tower" in unit_type:
+        return "Buildings & defense"
+    if "Settler" in unit_type or "Convoy" in unit_type:
+        return "Economy"
+    return "Army"
+
+
+def _research_category(upgrade_name: str) -> str:
+    return "Ages" if upgrade_name.startswith("Age") else "Research"
+
+
+def _cost_value(costs: dict[str, int] | None) -> int:
+    """One number for a unit's worth: gold + wood + iron (food is upkeep, left out)."""
+    return sum(int((costs or {}).get(r, 0) or 0) for r in ("gold", "wood", "iron"))
+
+
+def _add_costs(player: PlayerStats, costs: dict[str, int] | None, sign: int = 1,
+               category: str | None = None) -> None:
     for resource, amount in (costs or {}).items():
         if resource in player.resource_spent:
             player.resource_spent[resource] = max(0, player.resource_spent[resource] + sign * int(amount))
+            if category:
+                bucket = player.spending_by_category.setdefault(category, {"gold": 0, "wood": 0, "iron": 0, "food": 0})
+                bucket[resource] = max(0, bucket.get(resource, 0) + sign * int(amount))
+
+
+def _build_fights(deaths: list[tuple[int, int, int | None, int, str]], team_labels: dict[int, str]) -> list[dict[str, Any]]:
+    """Group hostile deaths into fights and rank them by value swing.
+
+    deaths: (seconds, losing team, killing team, value, unit type), hostile kills only.
+    A fight is a run of deaths with no gap over FIGHT_GAP_SECONDS. The swing is
+    the value the worse-off side lost beyond the better-off side; the side that
+    lost less value is the fight's winner.
+    """
+    fights: list[list[tuple[int, int, int | None, int, str]]] = []
+    for death in sorted(deaths):
+        if fights and death[0] - fights[-1][-1][0] <= FIGHT_GAP_SECONDS:
+            fights[-1].append(death)
+        else:
+            fights.append([death])
+    ranked = []
+    for group in fights:
+        if len(group) < FIGHT_MIN_DEATHS:
+            continue
+        lost_value: dict[int, int] = defaultdict(int)
+        lost_count: dict[int, int] = defaultdict(int)
+        lost_types: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for _, team, _, value, unit_type in group:
+            lost_value[team] += value
+            lost_count[team] += 1
+            lost_types[team][unit_type] += 1
+        sides = set(lost_value) | {k for _, _, k, _, _ in group if k is not None}
+        if len(sides) < 2:
+            continue
+        for side in sides:
+            lost_value.setdefault(side, 0)
+            lost_count.setdefault(side, 0)
+        order = sorted(sides, key=lambda t: lost_value[t])
+        winner, worst = order[0], order[-1]
+        swing = lost_value[worst] - lost_value[winner]
+        # Heaviest minute: the 60 s window with the largest value swing between sides.
+        peak = (-1, group[0][0], group[-1][0])
+        for i, first in enumerate(group):
+            window = {side: 0 for side in sides}
+            last = first[0]
+            for death in group[i:]:
+                if death[0] - first[0] > 60:
+                    break
+                window[death[1]] += death[3]
+                last = death[0]
+            window_swing = max(window.values()) - min(window.values())
+            if window_swing > peak[0]:
+                peak = (window_swing, first[0], last)
+        ranked.append({
+            "start": group[0][0], "end": group[-1][0],
+            "start_label": _time_label(group[0][0]), "end_label": _time_label(group[-1][0]),
+            "peak_start_label": _time_label(peak[1]), "peak_end_label": _time_label(peak[2]),
+            "winner_team": winner, "winner": team_labels.get(winner, f"Team {winner}"),
+            "swing": swing,
+            "sides": [
+                {"team": t, "label": team_labels.get(t, f"Team {t}"), "units_lost": lost_count[t],
+                 "value_lost": lost_value[t],
+                 "top_losses": sorted(lost_types[t].items(), key=lambda kv: -kv[1])[:3]}
+                for t in sorted(sides)
+            ],
+        })
+    ranked.sort(key=lambda f: -f["swing"])
+    top = ranked[:TOP_FIGHTS]
+    for rank, fight in enumerate(top, start=1):
+        fight["rank"] = rank
+    return top
 
 
 def _seconds_from_loops(game_loop: int | None, loops_per_second: float = DEFAULT_LOOPS_PER_SECOND) -> int | None:
@@ -570,6 +672,54 @@ def _remove_market_trades(state: dict[str, Any], sample: dict[str, dict[str, int
         state["gain"] = {r: g - sample[r].get("bought", 0) for r, g in gains.items()}
     for resource, values in sample.items():
         values["gathered_estimate"] = max(0, now[resource][0] - offsets.get(resource, 0))
+
+
+FOOD_SCALE = 4096  # SC2 stores supply in 1/4096 units
+
+
+def _apply_food_sample(player: PlayerStats, stats: dict[str, Any], seconds: int | None,
+                       state: dict[str, Any]) -> None:
+    """Food (supply) from the stats event: used vs cap, time capped, cap lost.
+
+    A drop in the cap means a house (supply building) was lost. Time counts as
+    supply-capped when food in use has reached the cap, so no unit can be trained.
+    """
+    if "m_scoreValueFoodUsed" not in stats and "m_scoreValueFoodMade" not in stats:
+        return
+    used = int(stats.get("m_scoreValueFoodUsed", 0) or 0) // FOOD_SCALE
+    cap = int(stats.get("m_scoreValueFoodMade", 0) or 0) // FOOD_SCALE
+    previous = state.get("last")
+    if previous and seconds is not None:
+        if cap < previous[2]:
+            player.food_cap_lost += previous[2] - cap
+    state["last"] = (seconds or 0, used, cap)
+    if seconds is not None:
+        player.food_samples.append([seconds, used, cap])
+    player.food_used, player.food_cap = used, cap
+    player.food_used_peak = max(player.food_used_peak, used)
+    player.food_cap_peak = max(player.food_cap_peak, cap)
+
+
+POPULATION_LIMIT_OPTIONS = (100, 125, 150, 175, 200, 250, 300, 400)
+
+
+def _finish_food(summary: ReplaySummary) -> None:
+    """Supply-capped time once the lobby population limit is known.
+
+    The map sets a per-player population limit from a lobby option (100-400);
+    the replay does not store it, so it is inferred: the highest food in use
+    by anyone, when that equals one of the options. A player is capped while
+    food in use has reached the lower of their house cap and that limit.
+    """
+    peak = max((p.food_used_peak for p in summary.players), default=0)
+    summary.population_limit = peak if peak in POPULATION_LIMIT_OPTIONS else None
+    for p in summary.players:
+        p.supply_capped_seconds = 0
+        for (t0, used, cap), (t1, _, _) in zip(p.food_samples, p.food_samples[1:]):
+            ceiling = min(cap, summary.population_limit) if summary.population_limit else cap
+            if ceiling > 0 and used >= ceiling:
+                p.supply_capped_seconds += max(0, t1 - t0)
+        p.food_samples = []  # only needed here; keeps the worker payload small
 
 
 def _derive_gather_rates(
@@ -967,6 +1117,10 @@ def _build_team_stats(summary: ReplaySummary) -> None:
             team.resource_spent_research[resource] += p.resource_spent_research[resource]
             team.resource_sold[resource] += p.resource_sold[resource]
             team.resource_lost_value[resource] += int(p.resource_lost_value.get(resource, 0) or 0)
+        for category, amounts in p.spending_by_category.items():
+            bucket = team.spending_by_category.setdefault(category, {"gold": 0, "wood": 0, "iron": 0, "food": 0})
+            for spent_resource, amount in amounts.items():
+                bucket[spent_resource] = bucket.get(spent_resource, 0) + amount
 
     for team in teams.values():
         _calculate_team_tech_score(team)
@@ -1399,6 +1553,7 @@ def parse_replay(path: Path) -> ReplaySummary:
         cost_table, summary.cost_table_match, summary.cost_table_note = _cost_table_for(
             map_hash, _safe_decode_string(details.get("m_title")))
         unit_costs = (cost_table or {}).get("units", {})
+        unit_categories = (cost_table or {}).get("categories", {})
         research_costs = (cost_table or {}).get("research", {})
         if summary.cost_table_note:
             summary.warnings.append(summary.cost_table_note)
@@ -1472,7 +1627,11 @@ def parse_replay(path: Path) -> ReplaySummary:
         tracker_count = 0
         tag_owner: dict[tuple[int, int], int] = {}
         # Buildings under construction and what they cost, for cancel refunds.
-        construction_costs: dict[tuple[int, int], tuple[PlayerStats, dict[str, int]]] = {}
+        construction_costs: dict[tuple[int, int], tuple[PlayerStats, dict[str, int], str]] = {}
+        # Living army units and their priced value, for the army-value series.
+        army_units: dict[tuple[int, int], tuple[PlayerStats, int]] = {}
+        army_value: dict[int, int] = defaultdict(int)  # id(player) -> value alive
+        hostile_deaths: list[tuple[int, int, int | None, int, str]] = []
         tag_type: dict[tuple[int, int], str] = {}
         pending_init: dict[tuple[int, int], tuple[int, str]] = {}
         max_tracker_loop = 0
@@ -1486,8 +1645,25 @@ def parse_replay(path: Path) -> ReplaySummary:
         gather_history: dict[int, dict[str, deque[tuple[int, int]]]] = defaultdict(dict)
         starting_stock: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
         market_state: dict[int, dict[str, Any]] = defaultdict(dict)
+        food_state: dict[int, dict[str, Any]] = defaultdict(dict)
         team_peak_rate: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         last_stats_loop: list[int | None] = [None]
+
+        def record_series(seconds: int) -> None:
+            if summary.economy_series and seconds - summary.economy_series[-1]["t"] < SERIES_STEP_SECONDS:
+                return
+            point: dict[str, Any] = {"t": seconds, "teams": {}}
+            for team_id, state in team_timeline_state.items():
+                members = [p for p in players if p.team_id is not None and int(p.team_id) == team_id]
+                point["teams"][str(team_id)] = {
+                    "gold_rate": int(state.get("gold_rate", 0) or 0),
+                    "wood_rate": int(state.get("wood_rate", 0) or 0),
+                    "iron_spent": sum(int(p.resource_spent.get("iron", 0) or 0) for p in members),
+                    "army_value": sum(army_value[id(p)] for p in members),
+                    "food_used": sum(p.food_used for p in members),
+                    "food_cap": sum(p.food_cap for p in members),
+                }
+            summary.economy_series.append(point)
 
         def commit_team_peaks() -> None:
             # Called between game loops, so every player's sample for the
@@ -1616,10 +1792,18 @@ def parse_replay(path: Path) -> ReplaySummary:
                         tag_owner[unit_tag] = int(pid)
                         tag_type[unit_tag] = unit_type
                     # Paid only when trained (a creator ability); map/trigger spawns are free.
+                    category = _spend_category(unit_type, unit_categories)
                     if unit_costs and event.get("m_creatorAbilityName") and not _is_animal_pid(pid):
                         buyer = _pid_to_player(players, pid)
                         if buyer:
-                            _add_costs(buyer, unit_costs.get(unit_type))
+                            _add_costs(buyer, unit_costs.get(unit_type), category=category)
+                    # Army value counts every living army unit, bought or spawned.
+                    if unit_tag and category == "Army" and not _is_animal_pid(pid) and unit_costs.get(unit_type):
+                        holder = _pid_to_player(players, pid)
+                        if holder:
+                            value = _cost_value(unit_costs[unit_type])
+                            army_units[unit_tag] = (holder, value)
+                            army_value[id(holder)] += value
 
                     if _is_animal_pid(pid):
                         animal = summary.animal_stats
@@ -1649,9 +1833,10 @@ def parse_replay(path: Path) -> ReplaySummary:
                         continue
                     player = _pid_to_player(players, pid)
                     if player and unit_costs.get(unit_type):
-                        _add_costs(player, unit_costs[unit_type])
+                        category = _spend_category(unit_type, unit_categories)
+                        _add_costs(player, unit_costs[unit_type], category=category)
                         if unit_tag:
-                            construction_costs[unit_tag] = (player, unit_costs[unit_type])
+                            construction_costs[unit_tag] = (player, unit_costs[unit_type], category)
                     if player and _is_structure(unit_type):
                         player.structures_started += 1
 
@@ -1686,13 +1871,25 @@ def parse_replay(path: Path) -> ReplaySummary:
                         tag_owner[unit_tag] = int(new_pid)
                         if unit_tag in pending_init:
                             pending_init[unit_tag] = (int(new_pid), pending_init[unit_tag][1])
+                        if unit_tag in army_units:
+                            old_holder, value = army_units[unit_tag]
+                            new_holder = _pid_to_player(players, new_pid)
+                            army_value[id(old_holder)] = max(0, army_value[id(old_holder)] - value)
+                            if new_holder:
+                                army_units[unit_tag] = (new_holder, value)
+                                army_value[id(new_holder)] += value
+                            else:
+                                army_units.pop(unit_tag, None)
 
                 elif event_name == "NNet.Replay.Tracker.SUnitDiedEvent":
                     unit_tag = _tag(event)
                     building = construction_costs.pop(unit_tag, None)
                     if building and not event.get("m_killerPlayerId"):
                         # Cancelled before completion: refunded. Destroyed by an enemy: stays spent.
-                        _add_costs(building[0], building[1], sign=-1)
+                        _add_costs(building[0], building[1], sign=-1, category=building[2])
+                    soldier = army_units.pop(unit_tag, None)
+                    if soldier:
+                        army_value[id(soldier[0])] = max(0, army_value[id(soldier[0])] - soldier[1])
                     owner_pid = event.get("m_unitOwnerPlayerId") or (tag_owner.get(unit_tag) if unit_tag else None)
                     unit_type = _decode_unit_type(event.get("m_unitTypeName"))
                     if unit_type == "UnknownUnit" and unit_tag in tag_type:
@@ -1737,6 +1934,11 @@ def parse_replay(path: Path) -> ReplaySummary:
                         owner.other_losses += 1
                         _increment(owner.unit_loss_counts, unit_type)
                     if owner and hostile:
+                        if owner.team_id is not None:
+                            hostile_deaths.append((
+                                event_seconds or 0, int(owner.team_id),
+                                int(killer.team_id) if killer and killer.team_id is not None else None,
+                                _cost_value(unit_costs.get(unit_type)) or 1, unit_type))
                         owner.losses += 1
                         _increment(owner.unit_loss_counts, unit_type)
                         if unit_type in MECHANICAL_UNIT_LABELS:
@@ -1772,7 +1974,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                     upgrade_name = _safe_decode_string(event.get("m_upgradeTypeName")) or "UnknownUpgrade"
                     if player:
                         if int(event.get("m_count", 1) or 0) > 0 and research_costs.get(upgrade_name):
-                            _add_costs(player, research_costs[upgrade_name])
+                            _add_costs(player, research_costs[upgrade_name], category=_research_category(upgrade_name))
                             for resource, amount in research_costs[upgrade_name].items():
                                 if resource in player.resource_spent_research:
                                     player.resource_spent_research[resource] += int(amount)
@@ -1785,6 +1987,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                     player_stats_event_count += 1
                     if last_stats_loop[0] is not None and loop != last_stats_loop[0]:
                         commit_team_peaks()
+                        record_series(secs(last_stats_loop[0]) or 0)
                     last_stats_loop[0] = loop
                     pid = event.get("m_playerId")
                     if _is_animal_pid(pid):
@@ -1799,6 +2002,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                         _remove_market_trades(market_state[id(player)], sample)
                         _derive_gather_rates(gather_history[id(player)], sample, sample_seconds)
                         _apply_resource_sample(player, sample, sample_seconds)
+                        _apply_food_sample(player, event.get("m_stats", {}), sample_seconds, food_state[id(player)])
                         refresh_side_state(player)
         except Exception as exc:
             summary.warnings.append(f"Could not decode tracker events: {exc}")
@@ -1808,6 +2012,8 @@ def parse_replay(path: Path) -> ReplaySummary:
         summary.raw_event_counts["player_stats_events"] = player_stats_event_count
         summary.raw_event_counts["resource_fields_seen"] = len(resource_fields_seen)
         commit_team_peaks()
+        if last_stats_loop[0] is not None:
+            record_series(secs(last_stats_loop[0]) or 0)
         if max_tracker_loop and (summary.duration_seconds is None or secs(max_tracker_loop) > summary.duration_seconds):
             summary.duration_seconds = secs(max_tracker_loop)
         snapshot_until(summary.duration_seconds)
@@ -1853,7 +2059,10 @@ def parse_replay(path: Path) -> ReplaySummary:
             summary.animal_stats = None
 
         _apply_leave_based_results(summary)
+        _finish_food(summary)
         _build_team_stats(summary)
+        summary.fights = _build_fights(
+            hostile_deaths, {t.team_id: f"Team {t.team_id} ({', '.join(t.players)})" for t in summary.teams})
         for team in summary.teams:
             if team.team_id in team_peak_rate:
                 # Best simultaneous 60 s window, not the sum of each player's own best.

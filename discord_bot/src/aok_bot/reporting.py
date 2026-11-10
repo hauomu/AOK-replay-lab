@@ -86,6 +86,61 @@ def _resource_cell(summary: ReplaySummary, resource: str, value: int | None) -> 
     return f"{int(value or 0):,}"
 
 
+SPENDING_COLUMNS = ("Army", "Economy", "Buildings & defense", "Research", "Ages")
+
+
+def _spend_cell(amounts: dict[str, int] | None) -> str:
+    amounts = amounts or {}
+    return " / ".join(f"{int(amounts.get(r, 0) or 0):,}" for r in ("gold", "wood", "iron"))
+
+
+def _spending_rows(summary: ReplaySummary, entities: list[Any], name) -> list[list[Any]]:
+    rows = []
+    for entity in entities:
+        spent = entity.spending_by_category
+        total_value = sum(sum(spent.get(c, {}).get(r, 0) for r in ("gold", "wood", "iron")) for c in SPENDING_COLUMNS)
+        army_value = sum(spent.get("Army", {}).get(r, 0) for r in ("gold", "wood", "iron"))
+        share = f"{round(100 * army_value / total_value)}%" if total_value else "n/a"
+        rows.append([name(entity)] + [_spend_cell(spent.get(c)) for c in SPENDING_COLUMNS] + [share])
+    return rows
+
+
+def _food_rows(players: list[Any]) -> list[list[Any]]:
+    return [[p.name, f"{p.food_used} / {p.food_cap}", f"{p.food_used_peak} / {p.food_cap_peak}",
+             _time_label(p.supply_capped_seconds) if p.supply_capped_seconds else "0:00", p.food_cap_lost]
+            for p in players]
+
+
+def _food_side_rows(summary: ReplaySummary, teams: list[Any]) -> list[list[Any]]:
+    rows = []
+    for t in teams:
+        members = [p for p in summary.players if p.team_id is not None and int(p.team_id) == t.team_id]
+        rows.append([_team_label_with_players(t, summary.match_mode),
+                     f"{sum(p.food_used for p in members)} / {sum(p.food_cap for p in members)}",
+                     f"{sum(p.food_cap_peak for p in members)}",
+                     _time_label(sum(p.supply_capped_seconds for p in members)),
+                     sum(p.food_cap_lost for p in members)])
+    return rows
+
+
+def _fight_lines(summary: ReplaySummary, limit: int = 5) -> list[str]:
+    lines = []
+    for fight in summary.fights[:limit]:
+        sides = " vs ".join(
+            f"{s['label']} lost {s['units_lost']} unit(s) worth {s['value_lost']:,}"
+            for s in fight["sides"])
+        losses = "; ".join(
+            f"{s['label'].split(' (')[0]}: " + ", ".join(f"{u} x{n}" for u, n in s["top_losses"])
+            for s in fight["sides"] if s["top_losses"])
+        heaviest = ""
+        if fight.get("peak_start_label") and (fight["peak_start_label"], fight["peak_end_label"]) != (fight["start_label"], fight["end_label"]):
+            heaviest = f" (heaviest {fight['peak_start_label']}-{fight['peak_end_label']})"
+        lines.append(
+            f"#{fight['rank']} {fight['start_label']}-{fight['end_label']}{heaviest}: {fight['winner']} won the trade by "
+            f"{fight['swing']:,} value. {sides}. Main losses: {losses}.")
+    return lines
+
+
 def _iron_spent_cell(summary: ReplaySummary, value: int | None) -> str:
     # Iron spent comes from the map cost table, not the tracker stockpile fields.
     if not summary.cost_table_match:
@@ -646,6 +701,11 @@ def _build_report_tables(summary: ReplaySummary) -> dict[str, list[list[Any]]]:
         "side_footprint": side_footprint_rows,
         "side_tech": side_tech_rows,
         "side_resources": side_resource_rows,
+        "side_spending": _spending_rows(summary, teams, lambda t: _team_label_with_players(t, summary.match_mode)),
+        "player_spending": _spending_rows(summary, _sort_players_for_report(summary), lambda p: p.name),
+        "fight_lines": _fight_lines(summary),
+        "food_side": _food_side_rows(summary, teams),
+        "food_players": _food_rows(_sort_players_for_report(summary)),
         "player_overview": player_overview_rows,
         "animal_rows": animal_rows,
         "raw_event_rows": raw_event_rows,
@@ -676,6 +736,16 @@ REPORT_TEMPLATE = r"""# AoK Replay Analysis
 
 {% for item in summary.turning_points -%}
 - {{ item }}
+{% endfor %}
+{% endif %}
+
+{% if tables.fight_lines %}
+## Biggest fights
+
+Fights are runs of enemy kills with no pause over 25 s, ranked by value swing (the worse-off side's losses minus the better-off side's, valued at gold + wood + iron cost). Times are exact replay timestamps.
+
+{% for item in tables.fight_lines -%}
+- {{ item | md }}
 {% endfor %}
 {% endif %}
 
@@ -814,6 +884,26 @@ These are cumulative 5-minute snapshots. They support the turning-point read but
 {{ table(['Player', 'Gold', 'Wood', 'Iron', 'Gold/min avg', 'Wood/min avg', 'Iron/min avg', 'Iron spent', 'Gathered estimate'], group.resource_rows, right=[1, 2, 3, 4, 5, 6, 7]) }}
 
 {% endfor -%}
+
+{% if tables.food_players and summary.parser_ok %}
+## Food (supply)
+
+Food is supply: houses raise the cap, every trained unit uses some, a dead unit frees it, and a lost house lowers the cap. Values come straight from the replay. **Supply-capped** is game time spent with food in use at the house cap or the lobby population limit{% if summary.population_limit %} ({{ summary.population_limit }} per player in this game){% endif %}, when no unit could be trained. **Cap lost** is supply removed by losing houses.
+
+{{ table(['Side', 'Food used / cap (end)', 'Peak cap', 'Supply-capped (player time)', 'Cap lost'], tables.food_side, right=[2, 4]) }}
+
+{{ table(['Player', 'Food used / cap (end)', 'Peak used / cap', 'Supply-capped', 'Cap lost'], tables.food_players, right=[4]) }}
+{% endif %}
+
+{% if summary.cost_table_match %}
+## Spending breakdown
+
+What each side and player spent their resources on, as **gold / wood / iron**, priced from this map version's costs (trained units, started buildings, completed research and age-ups). "Army share" is army spending as a share of all spending.
+
+{{ table(['Side', 'Army', 'Economy', 'Buildings & defense', 'Research', 'Ages', 'Army share'], tables.side_spending, right=[1, 2, 3, 4, 5, 6]) }}
+
+{{ table(['Player', 'Army', 'Economy', 'Buildings & defense', 'Research', 'Ages', 'Army share'], tables.player_spending, right=[1, 2, 3, 4, 5, 6]) }}
+{% endif %}
 
 ## Player technology profiles
 
@@ -964,6 +1054,10 @@ def make_match_embed(summary: ReplaySummary) -> discord.Embed:
             inline=False,
         )
 
+    fight_lines = _fight_lines(summary, limit=3)
+    if fight_lines:
+        embed.add_field(name="Biggest fights", value="\n".join(f"• {line}" for line in fight_lines)[:1024], inline=False)
+
     if summary.team_evaluations:
         # Keep the embed summary-first. The full numeric evidence lives in the Markdown attachment.
         embed.add_field(
@@ -1102,6 +1196,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
     if summary.verdict:
         lines.extend(["## Short verdict", "", summary.verdict, ""])
     _section(lines, "Turning point", summary.turning_points)
+    _section(lines, "Biggest fights", _fight_lines(summary))
     _section(lines, "FFA/player evaluations" if summary.match_mode == "Free-for-all" else "Team evaluations", summary.team_evaluations)
     _section(lines, "Technology + economy evaluation", summary.tech_evaluations)
     _section(lines, "Player 15 / Animals impact", summary.animal_impact)
@@ -1160,6 +1255,22 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
             lines.extend([f"### {group['label']}", ""])
             lines.append(_markdown_table(["Player", "Gold", "Wood", "Iron", "Gold/min avg", "Wood/min avg", "Iron/min avg", "Iron spent", "Gathered estimate"], group["resource_rows"], right=[1, 2, 3, 4, 5, 6, 7]))
             lines.append("")
+        if summary.parser_ok and summary.players:
+            lines.extend(["## Food (supply)", "", "Food is supply: houses raise the cap, units use it, losses free it, lost houses lower the cap.", ""])
+            lines.append(_markdown_table(["Side", "Food used / cap (end)", "Peak cap", "Supply-capped (player time)", "Cap lost"],
+                                         _food_side_rows(summary, _sort_teams_for_report(summary)), right=[2, 4]))
+            lines.append("")
+            lines.append(_markdown_table(["Player", "Food used / cap (end)", "Peak used / cap", "Supply-capped", "Cap lost"],
+                                         _food_rows(_sort_players_for_report(summary)), right=[4]))
+            lines.append("")
+        if summary.cost_table_match:
+            lines.extend(["## Spending breakdown", "", "Values are gold / wood / iron, priced from this map version's costs.", ""])
+            lines.append(_markdown_table(["Side", "Army", "Economy", "Buildings & defense", "Research", "Ages", "Army share"],
+                                         _spending_rows(summary, _sort_teams_for_report(summary), lambda t: _team_label_with_players(t, summary.match_mode)), right=[1, 2, 3, 4, 5, 6]))
+            lines.append("")
+            lines.append(_markdown_table(["Player", "Army", "Economy", "Buildings & defense", "Research", "Ages", "Army share"],
+                                         _spending_rows(summary, _sort_players_for_report(summary), lambda p: p.name), right=[1, 2, 3, 4, 5, 6]))
+            lines.append("")
         lines.extend(["## Player technology profiles", ""])
         for group in _build_player_table_groups(summary):
             lines.extend([f"### {group['label']}", ""])
@@ -1197,6 +1308,17 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
 def validate_mode(mode: str) -> None:
     if mode not in {"stats", "coaching", "team"}:
         raise ValueError("Unsupported report mode")
+
+
+def save_timeline_chart(summary: ReplaySummary, reports_dir: Path) -> Path | None:
+    """Economy + army timeline PNG next to the report; None when there is nothing to plot."""
+    import uuid
+    from .charts import render_timeline_chart
+    safe_name = ''.join(ch if ch.isascii() and (ch.isalnum() or ch in '._-') else '_' for ch in summary.source_path.stem)[:64] or "replay"
+    try:
+        return render_timeline_chart(summary, reports_dir / f"{safe_name}-timeline-{uuid.uuid4().hex[:12]}.png")
+    except Exception:
+        return None  # a chart problem must never cost the user the report
 
 
 def save_markdown_report(summary: ReplaySummary, reports_dir: Path, mode: str = "stats") -> Path:
