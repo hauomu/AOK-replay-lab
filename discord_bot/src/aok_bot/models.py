@@ -49,6 +49,13 @@ class PlayerStats:
 
     units_born: int = 0
     structures_started: int = 0
+    # Defensive structures by kind (see defense.py): placed/completed/standing/lost,
+    # denied (cancelled/destroyed_building/unfinished), builder kills and their
+    # outcomes, denial inflicted on enemies, and resources in standing defenses.
+    defense: dict[str, dict[str, int]] = field(default_factory=dict)
+    defense_builder_kills: dict[str, int] = field(default_factory=dict)
+    denial_inflicted: dict[str, int] = field(default_factory=dict)
+    defense_value_standing: int = 0
     structures_done: int = 0
     static_defense: int = 0
     walls_gates: int = 0
@@ -272,6 +279,9 @@ class ReplaySummary:
     # biggest fights by value swing, with exact replay timestamps.
     economy_series: list[dict[str, Any]] = field(default_factory=list)
     fights: list[dict[str, Any]] = field(default_factory=list)
+    # Notable defense denials (castles/towers, builder kills) and map-control reads.
+    defense_events: list[dict[str, Any]] = field(default_factory=list)
+    defense_findings: list[str] = field(default_factory=list)
     raw_event_counts: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     parser_ok: bool = False

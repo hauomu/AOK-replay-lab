@@ -2,9 +2,9 @@
 
 Panels: each side's gather rate (gold + wood per minute, from the replay's
 resource stats) and iron spent per minute (priced from the map's costs; the
-replay holds no iron stockpile). Bottom panel: army value alive (gold + wood +
-iron cost of living army units). Third: food (supply) in use vs the cap from
-houses. The biggest fights are shaded and numbered.
+replay holds no iron stockpile). Second panel: army value alive (gold + wood +
+iron cost of living army units) and the value of defenses still standing.
+Third: food (supply) in use vs the cap from houses. The biggest fights are shaded and numbered.
 matplotlib is optional: without it no chart is produced and reports still work.
 """
 from __future__ import annotations
@@ -46,7 +46,9 @@ def render_timeline_chart(summary: ReplaySummary, out_path: Path) -> Path | None
         eco.plot(minutes, gather, color=colour, linewidth=1.8, label=f"{name} gold+wood gathered/min")
         eco.plot(minutes, iron_rate, color=colour, linewidth=1.2, linestyle="--", label=f"{name} iron spent/min")
         army.plot(minutes, [p["teams"].get(tid, {}).get("army_value", 0) for p in series],
-                  color=colour, linewidth=1.8, label=name)
+                  color=colour, linewidth=1.8, label=f"{name} army alive")
+        army.plot(minutes, [p["teams"].get(tid, {}).get("defense_value", 0) for p in series],
+                  color=colour, linewidth=1.2, linestyle="--", label=f"{name} defenses standing")
         food.plot(minutes, [p["teams"].get(tid, {}).get("food_used", 0) for p in series],
                   color=colour, linewidth=1.6, label=f"{name} food used")
         food.plot(minutes, [p["teams"].get(tid, {}).get("food_cap", 0) for p in series],
@@ -56,15 +58,15 @@ def render_timeline_chart(summary: ReplaySummary, out_path: Path) -> Path | None
         start, end = fight["start"] / 60, max(fight["end"], fight["start"] + 10) / 60
         for axis in (eco, army, food):
             axis.axvspan(start, end, color="#718096", alpha=0.15, linewidth=0)
-        army.annotate(f"#{fight['rank']}", xy=(start, 1), xycoords=("data", "axes fraction"),
-                      xytext=(2, -12 - 11 * ((fight["rank"] - 1) % 2)), textcoords="offset points",
+        army.annotate(f"#{fight['rank']}", xy=(start, 0), xycoords=("data", "axes fraction"),
+                      xytext=(2, 3 + 11 * ((fight["rank"] - 1) % 2)), textcoords="offset points",
                       fontsize=8, color="#2d3748")
 
     eco.set_title(f"{summary.map_name or 'AoK'} | {summary.duration_label()} | {summary.winner_display()[:70]}", fontsize=10)
     eco.set_ylabel("per minute")
     eco.legend(fontsize=7, loc="upper left", ncol=2, frameon=False)
-    army.set_ylabel("army value alive")
-    army.legend(fontsize=7, loc="upper left", frameon=False)
+    army.set_ylabel("value (gold+wood+iron)")
+    army.legend(fontsize=7, loc="upper left", ncol=2, frameon=False)
     food.set_ylabel("food (supply)")
     food.set_xlabel("game time (minutes); shaded = biggest fights")
     food.legend(fontsize=7, loc="upper left", ncol=2, frameon=False)

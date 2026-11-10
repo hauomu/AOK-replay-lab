@@ -25,4 +25,6 @@ Why it is this way. Numbered; amend in place, add new entries for reversals.
 
 9. **One stored row per game** (2026-11-10): `replays.game_key` = `m_randomValue` from initData + sorted human account handles. Every copy of a game (renamed file, a teammate's recording) maps to one row; the newest good parse wins. The seed was unique across all 1,264 local replays. Rows without a key are never merged.
 
+10. **Defenses are map control** (user, 2026-11-10): castles, guard towers and watch towers (WatchTower is the in-game outpost: vision, no attack) matter as much as army for strong defensive players (Sebda, TwoDie, the user). Track them per kind with denial. Cancelled vs destroyed is exact (killer recorded); builder kills are inferred (owner's worker killed by an enemy within ~3-5 cells of a site under construction) and labelled as such. Large castle counts (22 for TwoDie in a 42-min game) are real.
+
 7. **Delegation:** Codex models only via the Codex plugin companion; ocx agents are blocked by a PreToolUse hook that redirects them to the plugin.

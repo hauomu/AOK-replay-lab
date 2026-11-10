@@ -4,6 +4,11 @@ History, newest first. About 10 entries; older ones move to `SESSION_HANDOFF_ARC
 
 > Last verified: 2026-11-10 by Claude Opus 5.5.
 
+## 2026-11-10 23:00 (SGT) — Claude Code session: duplicates (PR #19) + defense tracking
+
+- PR #19 merged `[skip ci]` (0 runs), deployed 22:37 SGT; live backfill keyed 12 replays and deleted duplicate replay 12 (user-approved).
+- Defense + denial tracking built on `feat/defense-tracking` (not pushed). Lesson: fetch after `gh pr merge` before branching; the first attempt branched from a stale `origin/main`.
+
 ## 2026-11-10 19:25 (SGT) — Claude Code session: player identity (PR #18)
 
 - PR #18 merged `[skip ci]` (0 CI runs) and deployed 19:17 SGT: `account_id` (Battle.net handle) per player row; profiles/leaderboard grouped by account; `/aok_player` accepts a handle. 106 tests.

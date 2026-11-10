@@ -5,6 +5,7 @@ from typing import Any
 
 import discord
 
+from .defense import side_totals
 from .models import PlayerStats, ReplaySummary, TeamStats
 from .analysis_hooks import analyze
 
@@ -535,6 +536,95 @@ def _build_timeline_table_groups(summary: ReplaySummary) -> list[dict[str, Any]]
     return groups
 
 
+
+DEFENSE_TABLE_HEADERS = ["Castles", "Guard towers", "Watch towers", "Walls", "Gates", "Lost after built",
+                         "Denied (destroyed / cancelled / unfinished)", "Builder kills (resumed / cancelled / destroyed)",
+                         "Denial inflicted (defenses / under construction / builders)", "Defense value standing"]
+
+
+def _defense_row(label: str, totals: dict[str, Any]) -> list[Any]:
+    kinds = totals["kinds"]
+
+    def cell(kind: str) -> str:
+        counts = kinds.get(kind, {})
+        return f"{counts.get('standing', 0)} / {counts.get('completed', 0)}" if counts else "-"
+
+    def total(key: str) -> int:
+        return sum(c.get(key, 0) for c in kinds.values())
+
+    walls = {k: kinds.get(k, {}) for k in ("Wall", "Barricade")}
+    wall_cell = "-" if not any(walls.values()) else (
+        f"{sum(c.get('standing', 0) for c in walls.values())} / {sum(c.get('completed', 0) for c in walls.values())}")
+    builder, inflicted = totals["builder"], totals["inflicted"]
+    builder_cell = "-" if not builder.get("sites") else (
+        f"{builder['sites']} ({builder.get('resumed', 0)} / {builder.get('cancelled', 0)} / "
+        f"{builder.get('destroyed', 0) + builder.get('destroyed_later', 0)})")
+    return [
+        label, cell("Castle"), cell("Guard tower"), cell("Watch tower"), wall_cell, cell("Gate"),
+        total("lost"),
+        f"{total('destroyed_building')} / {total('cancelled')} / {total('unfinished')}",
+        builder_cell,
+        f"{inflicted.get('defenses_destroyed', 0)} / {inflicted.get('builds_destroyed', 0)} / {inflicted.get('builders_killed', 0)}",
+        totals["value"],
+    ]
+
+
+def _defense_event_lines(summary: ReplaySummary) -> list[str]:
+    lines = []
+    for e in summary.defense_events:
+        when = f"{_time_label(e['start'])}-{_time_label(e['end'])}" if e.get("end") is not None else f"{_time_label(e['start'])}-end"
+        builder = ""
+        if e.get("builder_killed_at") is not None:
+            workers = e.get("workers_killed", 1)
+            builder = f"; builder{'s' if workers != 1 else ''} likely killed at {_time_label(e['builder_killed_at'])}"
+            if workers > 1:
+                builder += f" ({workers} workers)"
+        by = f" by {e['attacker']}" if e.get("attacker") else ""
+        delay = f", {e['delay']} s later than usual" if e.get("delay") else ""
+        lines.append(f"{e['owner']}'s {e['kind'].lower()} ({when}): {e['outcome']}{delay}{by}{builder}.")
+    return lines
+
+
+def _defense_tables(summary: ReplaySummary) -> dict[str, Any]:
+    if not any(p.defense for p in summary.players):
+        return {}
+    sides = [
+        _defense_row(_team_label_with_players(t, summary.match_mode),
+                     side_totals([p for p in summary.players if p.team_id == t.team_id]))
+        for t in _sort_teams_for_report(summary)
+    ]
+    players = [_defense_row(p.name, side_totals([p])) for p in _sort_players_for_report(summary)]
+    return {"sides": sides, "players": players, "events": _defense_event_lines(summary)}
+
+
+DEFENSE_NOTE = (
+    "Castles, guard towers and watch towers (outposts: vision, no attack) are shown as **standing at the end / built**. "
+    "**Denied** defenses never completed: destroyed by an enemy while being built, cancelled by the owner, or unfinished when the game ended. "
+    "**Builder kills** are inferred: an enemy killed one of the owner's workers right next to a defense still under construction "
+    "(the replay does not record which worker was building). Their outcome is followed: resumed and finished, cancelled, or destroyed. "
+    "**Defense value** is the gold + wood + iron cost of defenses still standing."
+)
+
+
+def _defense_markdown(summary: ReplaySummary) -> list[str]:
+    tables = _defense_tables(summary)
+    if not tables:
+        return []
+    right = list(range(6, 11))
+    lines = ["## Defense and map control", "", DEFENSE_NOTE, ""]
+    lines.extend(f"- {line}" for line in summary.defense_findings)
+    if summary.defense_findings:
+        lines.append("")
+    lines.append(_markdown_table(["Side"] + DEFENSE_TABLE_HEADERS, tables["sides"], right=right))
+    lines.append("")
+    lines.append(_markdown_table(["Player"] + DEFENSE_TABLE_HEADERS, tables["players"], right=right))
+    if tables["events"]:
+        lines.extend(["", "### Notable denials and builder kills", ""])
+        lines.extend(f"- {line}" for line in tables["events"])
+    lines.append("")
+    return lines
+
+
 def _embed_key_findings(summary: ReplaySummary) -> list[str]:
     """Rebuild the most important evidence lines with guaranteed side labels."""
     players = summary.players
@@ -796,6 +886,8 @@ Fights are runs of enemy kills with no pause over 25 s, ranked by value swing (t
 - {{ item }}
 {% endfor %}
 {% endif %}
+
+{{ defense_section }}
 
 {% if tables.side_overview %}
 ## {{ 'FFA/player side overview' if summary.match_mode == 'Free-for-all' else 'Team overview' }}
@@ -1072,6 +1164,13 @@ def make_match_embed(summary: ReplaySummary) -> discord.Embed:
             inline=False,
         )
 
+    if summary.defense_findings:
+        embed.add_field(
+            name="Defense + map control",
+            value="\n".join(f"• {line}" for line in summary.defense_findings[:4])[:1024],
+            inline=False,
+        )
+
     tech_economy_lines = _tech_economy_embed_lines(summary)
     if tech_economy_lines:
         embed.add_field(
@@ -1160,6 +1259,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
             left_time=_left_time,
             player_with_side=_player_with_side,
             player_table_groups=_build_player_table_groups(summary),
+            defense_section="\n".join(_defense_markdown(summary)),
             timeline_table_groups=_build_timeline_table_groups(summary),
             players_by_combat=sorted(summary.players, key=lambda p: (p.kills, p.animal_kills, p.tech_score, p.units_born), reverse=True),
             timed_items=_timed_items,
@@ -1203,6 +1303,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
     _section(lines, "Most useful player takeaway", summary.player_takeaways)
     _section(lines, "Evidence highlights", summary.key_findings)
     _section(lines, "Match story notes", summary.match_story)
+    lines.extend(_defense_markdown(summary))
 
     if tables["side_overview"]:
         lines.extend(["## FFA/player side overview" if summary.match_mode == "Free-for-all" else "## Team overview", ""])
