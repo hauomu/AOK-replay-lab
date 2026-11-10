@@ -102,6 +102,9 @@ class Storage:
             # Players are identified by Battle.net account; rows saved before this have NULL.
             self._ensure_column(conn, "replay_players", "account_id", "TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_replay_players_account ON replay_players(account_id)")
+            # One stored row per game, however many copies of it are uploaded.
+            self._ensure_column(conn, "replays", "game_key", "TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_replays_game_key ON replays(game_key)")
 
     def save_replay(self, summary: ReplaySummary) -> int:
         with closing(self.connect()) as conn, conn:
@@ -110,13 +113,16 @@ class Storage:
             warnings_json = json.dumps(summary.warnings, ensure_ascii=False)
 
             # Re-analyzing the same replay should replace old player rows, not duplicate them.
-            old_row = conn.execute(
-                "SELECT id, parser_ok FROM replays WHERE source_path = ?",
-                (str(summary.source_path),),
-            ).fetchone()
-            if old_row is not None and old_row["parser_ok"] and not summary.parser_ok:
-                return int(old_row["id"])
-            if old_row is not None:
+            # Another copy of the same game (a teammate's recording, a renamed file)
+            # counts as the same replay.
+            old_rows = conn.execute(
+                "SELECT id, parser_ok FROM replays WHERE source_path = ? OR (game_key IS NOT NULL AND game_key = ?)",
+                (str(summary.source_path), summary.game_key),
+            ).fetchall()
+            kept = next((r for r in old_rows if r["parser_ok"]), None)
+            if kept is not None and not summary.parser_ok:
+                return int(kept["id"])
+            for old_row in old_rows:
                 conn.execute("DELETE FROM replay_players WHERE replay_id = ?", (old_row["id"],))
                 conn.execute("DELETE FROM replays WHERE id = ?", (old_row["id"],))
 
@@ -124,8 +130,8 @@ class Storage:
                 """
                 INSERT INTO replays (
                     source_path, map_name, duration_seconds, game_version,
-                    parser_ok, warnings_json, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    parser_ok, warnings_json, raw_json, game_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     str(summary.source_path),
@@ -135,6 +141,7 @@ class Storage:
                     1 if summary.parser_ok else 0,
                     warnings_json,
                     raw_json,
+                    summary.game_key,
                 ),
             )
             replay_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])

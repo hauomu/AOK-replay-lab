@@ -23,4 +23,6 @@ Why it is this way. Numbered; amend in place, add new entries for reversals.
 
 8. **Player identity = Battle.net account** (2026-11-10): `replay_players.account_id` holds the handle `region-S2-realm-id` from `details.m_toon`. One account is one profile across renames (latest name shown); same-name accounts stay apart and are told apart by handle. Rows without an account id join the single account that used that name, otherwise stand alone under the exact name. Old rows are backfilled by `scripts/backfill_account_ids.py` (match by player-name list + duration).
 
+9. **One stored row per game** (2026-11-10): `replays.game_key` = `m_randomValue` from initData + sorted human account handles. Every copy of a game (renamed file, a teammate's recording) maps to one row; the newest good parse wins. The seed was unique across all 1,264 local replays. Rows without a key are never merged.
+
 7. **Delegation:** Codex models only via the Codex plugin companion; ocx agents are blocked by a PreToolUse hook that redirects them to the plugin.
