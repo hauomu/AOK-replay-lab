@@ -2,14 +2,14 @@
 
 What is true now, so a future session does not have to rediscover it. Rewritten in place; history lives in `SESSION_HANDOFF.md`, reasons in `DECISIONS.md`.
 
-> Last verified: 2026-11-10 18:45 SGT by Claude Opus 5.5 (Claude Code). Read `NEXT_WORK.md` next.
+> Last verified: 2026-11-10 19:05 SGT by Claude Opus 5.5 (Claude Code). Read `NEXT_WORK.md` next.
 
 ## Where things are
 
 - **Repo:** `C:\Users\Sherman\Projects\AOK-replay-lab` (GitHub `hauomu/AOK-replay-lab`, default branch `main`). The older copy at `Desktop\Portfolio\aok-replay-lab` is not a git checkout; don't use it.
 - **Live bot:** Tomo, `~/aok-bot` (git checkout of `main`), container `aok-replay-bot`, deployed with `bash scripts/deploy_tomo.sh` (backs up the SQLite DB to `data/backups/` first, pulls `main`, rebuilds, restarts). Discord bot name "AoK FourDie Companion Bot". Secrets in `~/aok-bot/.env` (never read).
-- **Live revision:** `f763918` (PR #16, iron spent), deployed 2026-11-10 18:01 SGT.
-- **Unshipped work:** branch `spending-charts-fights`, commit `93f8956` (spending breakdown, biggest fights, food supply, timeline chart). 99 tests pass locally. Full corpus run on Tomo was in progress when this was written: results land in `outputs/corpus_check_final.jsonl`; a report + chart for the user's own upload land in `outputs/upload_test/`.
+- **Live revision:** `229d0d1` (PR #17: spending breakdown, biggest fights, food supply, timeline chart), deployed 2026-11-10 19:01 SGT. Corpus results for it: `outputs/corpus_check_final.jsonl`; sample report + chart for the user's own upload: `outputs/upload_test/`.
+- **Discord upload cache on Tomo:** `~/aok-bot/data/replays/` (root-owned, 30-day sweep).
 - **Local test replays:** `C:\Users\Sherman\Documents\StarCraft II\Accounts\250707847\2-S2-1-8333926\Replays\Multiplayer` (269 AoK replays). A copy is on Tomo at `/tmp/aokcorpus` (temporary).
 - **Corpus checker:** `outputs/corpus_check.py <dir> <out.jsonl>`, run inside a throwaway `docker run --rm` of the built image on Tomo (~10 min for 269 replays). Never `docker exec`/stop the live `aok-replay-bot`.
 
@@ -23,7 +23,7 @@ What is true now, so a future session does not have to rediscover it. Rewritten 
 - **Iron = SC2 Terrazine.** Stockpile/income are not in replays (n/a). **Iron spent** is priced from per-map-version cost tables `discord_bot/src/aok_bot/data/aok_costs.json`, built by `scripts/extract_aok_costs.py` from the local Battle.net cache (70 versions, 56 price sets; Legacy and official map differ). Validated: priced gold/wood vs recorded spending median 1.00 (IQR 0.95-1.03).
 - Cleanup: reports deleted after sending; sweep of uploads/reports >1 day, replay cache >30 days (`REPLAY_CACHE_DAYS`).
 
-## In the unshipped branch (verified locally, not live)
+## Also live since PR #17
 
 - Spending breakdown per player/side (Army / Economy / Buildings & defense / Research / Ages; gold/wood/iron) using the map's CostCategory.
 - Biggest fights: hostile deaths clustered by >25 s gaps, ranked by value swing, exact start/end + heaviest-minute timestamps.

@@ -10,4 +10,5 @@ History, newest first. About 10 entries; older ones move to `SESSION_HANDOFF_ARC
 - Verified with a 269-replay corpus checker (`outputs/corpus_check_*.jsonl`) per round; validation of iron pricing in `outputs/validate_spent.csv`.
 - Astra review (real, via Codex plugin, gpt-6-astra confirmed in rollout): `outputs/astra_review_codex.md`. An earlier "Astra" review via an ocx agent actually ran on Haiku: `outputs/astra_review.md` (treat as unverified).
 - Backlog + TwoDie requests written: `outputs/aok_remaining_work_and_twodie_requests.md`.
-- Unshipped at handoff: branch `spending-charts-fights` 93f8956 — see `NEXT_WORK.md` item 1.
+- #17 spending breakdown, biggest fights, food supply (user: food = supply from houses), timeline chart — merged and deployed 19:01 SGT (backup `aok_bot-20261110T110120Z.sqlite3`). 99 tests; 269-replay corpus clean.
+- Temporary Tomo artefacts removed (`/tmp/aokbuild`, test images); `/tmp/aokcorpus`, `/tmp/aokmaps`, `/tmp/aokmapx`, `/tmp/aokout` remain for reruns.
