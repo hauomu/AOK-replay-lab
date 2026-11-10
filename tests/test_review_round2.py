@@ -52,6 +52,14 @@ class ResultRuleTests(unittest.TestCase):
         self.assertEqual(run(s), ["Loss", "Loss", "Win"])
         self.assertEqual(s.result_source, "leaves")
 
+    def test_recorded_winner_means_the_other_side_lost(self):
+        s = summary("Team", 2000, True,
+                    PlayerStats("A", team_id=0, result="Win"),
+                    PlayerStats("B", team_id=1, result="Undecided", leave_time_seconds=1990),
+                    PlayerStats("C", team_id=1, result="Undecided", leave_time_seconds=1500))
+        self.assertEqual(run(s), ["Win", "Loss", "Loss"])
+        self.assertEqual({t.team_id: t.result for t in s.teams}, {0: "Win", 1: "Loss"})
+
     def test_single_side_gets_no_invented_win(self):
         s = summary("Team", 2000, True,
                     PlayerStats("A", team_id=0, result="Undecided"),
