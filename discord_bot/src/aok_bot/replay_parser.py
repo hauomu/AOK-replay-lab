@@ -215,6 +215,45 @@ LOOPS_PER_SECOND_BY_SPEED = {0: 9.6, 1: 12.8, 2: 16.0, 3: 19.2, 4: 22.4}
 DEFAULT_LOOPS_PER_SECOND = 22.4
 
 
+COSTS_PATH = Path(__file__).with_name("data") / "aok_costs.json"
+_COSTS_CACHE: dict[str, Any] = {}
+
+
+def _load_cost_tables() -> dict[str, Any]:
+    if "data" not in _COSTS_CACHE:
+        try:
+            import json
+            _COSTS_CACHE["data"] = json.loads(COSTS_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            _COSTS_CACHE["data"] = {"maps": {}, "tables": {}}
+    return _COSTS_CACHE["data"]
+
+
+def _cost_table_for(map_hash: str | None, title: str | None) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    """Cost table for this map version, else the newest known version of the same map.
+
+    AoK versions (Legacy, the official map and their updates) price units,
+    buildings, research and ages differently, so an exact match is preferred.
+    """
+    data = _load_cost_tables()
+    maps, tables = data.get("maps", {}), data.get("tables", {})
+    if map_hash and map_hash in maps:
+        return tables.get(maps[map_hash]["table"]), "exact", None
+    same_title = [m for m in maps.values() if title and m.get("title") == title]
+    if same_title:
+        newest = max(same_title, key=lambda m: m.get("last_played", ""))
+        note = (f"This map version is not in the bot's cost tables; iron spent uses the newest known "
+                f"{title} prices (last played {newest.get('last_played')}).")
+        return tables.get(newest["table"]), "fallback", note
+    return None, None, None
+
+
+def _add_costs(player: PlayerStats, costs: dict[str, int] | None, sign: int = 1) -> None:
+    for resource, amount in (costs or {}).items():
+        if resource in player.resource_spent:
+            player.resource_spent[resource] = max(0, player.resource_spent[resource] + sign * int(amount))
+
+
 def _seconds_from_loops(game_loop: int | None, loops_per_second: float = DEFAULT_LOOPS_PER_SECOND) -> int | None:
     if game_loop is None:
         return None
@@ -778,7 +817,14 @@ def _apply_leave_based_results(summary: ReplaySummary) -> None:
             "so it does not identify a winner."
         )
     elif len(win_sides) == 1:
-        return  # one recorded winning side: keep the metadata
+        # One recorded winning side: everyone else lost (SC2 marks only players
+        # present at the end as Win, so the other sides were gone).
+        for tid, ps in grouped.items():
+            if tid not in win_sides:
+                for player in ps:
+                    if player.result in (None, "", "Undecided"):
+                        player.result = "Loss"
+        return
 
     if len(grouped) < 2:
         return
@@ -917,6 +963,8 @@ def _build_team_stats(summary: ReplaySummary) -> None:
             team.resource_gathered_estimate[resource] += int(p.resource_gathered_estimate.get(resource, 0) or 0)
             team.resource_average_rate[resource] += p.resource_average_rate[resource]
             team.resource_bought[resource] += p.resource_bought[resource]
+            team.resource_spent[resource] += p.resource_spent[resource]
+            team.resource_spent_research[resource] += p.resource_spent_research[resource]
             team.resource_sold[resource] += p.resource_sold[resource]
             team.resource_lost_value[resource] += int(p.resource_lost_value.get(resource, 0) or 0)
 
@@ -973,6 +1021,8 @@ def _build_tech_evaluations(summary: ReplaySummary) -> list[str]:
             + (f"; market trades (not counted as gathered): bought {_resource_triplet(team.resource_bought, summary.resource_channels_seen)}, "
                f"sold {_resource_triplet(team.resource_sold, summary.resource_channels_seen)}"
                if any(team.resource_bought.values()) else "")
+            + (f"; iron spent {team.resource_spent['iron']:,} (research and ages {team.resource_spent_research['iron']:,})"
+               if summary.cost_table_match else "")
             + "."
             if resources_available else
             " Resource tracker fields were not available in this replay."
@@ -1344,6 +1394,14 @@ def parse_replay(path: Path) -> ReplaySummary:
         except Exception:
             initdata = None
         user_index = user_player_indices(details.get("m_playerList", []), initdata)
+        handles = details.get("m_cacheHandles") or []
+        map_hash = bytes(handles[-1])[8:].hex() if handles else None
+        cost_table, summary.cost_table_match, summary.cost_table_note = _cost_table_for(
+            map_hash, _safe_decode_string(details.get("m_title")))
+        unit_costs = (cost_table or {}).get("units", {})
+        research_costs = (cost_table or {}).get("research", {})
+        if summary.cost_table_note:
+            summary.warnings.append(summary.cost_table_note)
 
         summary.map_name = _safe_decode_string(details.get("m_title"))
         if not summary.map_name:
@@ -1413,6 +1471,8 @@ def parse_replay(path: Path) -> ReplaySummary:
         # Player 15/animal interactions, and resource snapshots.
         tracker_count = 0
         tag_owner: dict[tuple[int, int], int] = {}
+        # Buildings under construction and what they cost, for cancel refunds.
+        construction_costs: dict[tuple[int, int], tuple[PlayerStats, dict[str, int]]] = {}
         tag_type: dict[tuple[int, int], str] = {}
         pending_init: dict[tuple[int, int], tuple[int, str]] = {}
         max_tracker_loop = 0
@@ -1450,6 +1510,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                 "gold_rate": 0,
                 "wood_rate": 0,
                 "iron_rate": 0,
+                "iron_spent": 0,
                 "age": "Starting age",
                 "tech_score": 0,
                 "mechanical_units": 0,
@@ -1468,6 +1529,7 @@ def parse_replay(path: Path) -> ReplaySummary:
             for resource in ("gold", "wood", "iron"):
                 state[resource] = sum(int(p.resource_current.get(resource, 0) or 0) for p in members)
                 state[f"{resource}_rate"] = sum(int(p.resource_collection_rate.get(resource, 0) or 0) for p in members)
+            state["iron_spent"] = sum(int(p.resource_spent.get("iron", 0) or 0) for p in members)
             age_player = max(members, key=lambda p: p.age_stage(), default=None)
             state["age"] = age_player.current_age() if age_player else "Starting age"
             state["tech_score"] = _side_frontier_tech_score(members)
@@ -1553,6 +1615,11 @@ def parse_replay(path: Path) -> ReplaySummary:
                     if unit_tag and pid:
                         tag_owner[unit_tag] = int(pid)
                         tag_type[unit_tag] = unit_type
+                    # Paid only when trained (a creator ability); map/trigger spawns are free.
+                    if unit_costs and event.get("m_creatorAbilityName") and not _is_animal_pid(pid):
+                        buyer = _pid_to_player(players, pid)
+                        if buyer:
+                            _add_costs(buyer, unit_costs.get(unit_type))
 
                     if _is_animal_pid(pid):
                         animal = summary.animal_stats
@@ -1581,11 +1648,16 @@ def parse_replay(path: Path) -> ReplaySummary:
                     if _is_animal_pid(pid):
                         continue
                     player = _pid_to_player(players, pid)
+                    if player and unit_costs.get(unit_type):
+                        _add_costs(player, unit_costs[unit_type])
+                        if unit_tag:
+                            construction_costs[unit_tag] = (player, unit_costs[unit_type])
                     if player and _is_structure(unit_type):
                         player.structures_started += 1
 
                 elif event_name == "NNet.Replay.Tracker.SUnitDoneEvent":
                     unit_tag = _tag(event)
+                    construction_costs.pop(unit_tag, None)
                     if unit_tag and unit_tag in pending_init:
                         pid, unit_type = pending_init[unit_tag]
                         if _is_animal_pid(pid):
@@ -1617,6 +1689,10 @@ def parse_replay(path: Path) -> ReplaySummary:
 
                 elif event_name == "NNet.Replay.Tracker.SUnitDiedEvent":
                     unit_tag = _tag(event)
+                    building = construction_costs.pop(unit_tag, None)
+                    if building and not event.get("m_killerPlayerId"):
+                        # Cancelled before completion: refunded. Destroyed by an enemy: stays spent.
+                        _add_costs(building[0], building[1], sign=-1)
                     owner_pid = event.get("m_unitOwnerPlayerId") or (tag_owner.get(unit_tag) if unit_tag else None)
                     unit_type = _decode_unit_type(event.get("m_unitTypeName"))
                     if unit_type == "UnknownUnit" and unit_tag in tag_type:
@@ -1695,6 +1771,11 @@ def parse_replay(path: Path) -> ReplaySummary:
                     player = _pid_to_player(players, pid)
                     upgrade_name = _safe_decode_string(event.get("m_upgradeTypeName")) or "UnknownUpgrade"
                     if player:
+                        if int(event.get("m_count", 1) or 0) > 0 and research_costs.get(upgrade_name):
+                            _add_costs(player, research_costs[upgrade_name])
+                            for resource, amount in research_costs[upgrade_name].items():
+                                if resource in player.resource_spent_research:
+                                    player.resource_spent_research[resource] += int(amount)
                         player.upgrades += 1
                         _increment(player.upgrade_type_counts, upgrade_name)
                         _record_upgrade(player, upgrade_name, event_seconds)

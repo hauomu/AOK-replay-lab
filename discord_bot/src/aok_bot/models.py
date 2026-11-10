@@ -105,6 +105,12 @@ class PlayerStats:
     resource_average_rate: dict[str, int] = field(default_factory=_resource_dict)
     # Market trades, kept out of gathered/rates: amount bought and sold per resource.
     resource_bought: dict[str, int] = field(default_factory=_resource_dict)
+    # Spent on trained units, buildings and research, priced from the map's own
+    # cost table. The only source for iron (SC2 Terrazine), which replays do not
+    # record as a stockpile.
+    resource_spent: dict[str, int] = field(default_factory=_resource_dict)
+    # The research/age-up part of resource_spent (SC2 score fields leave research out).
+    resource_spent_research: dict[str, int] = field(default_factory=_resource_dict)
     resource_sold: dict[str, int] = field(default_factory=_resource_dict)
     resource_gathered_estimate: dict[str, int] = field(default_factory=_resource_dict)
     resource_lost_value: dict[str, int] = field(default_factory=_resource_dict)
@@ -197,6 +203,12 @@ class TeamStats:
     resource_average_rate: dict[str, int] = field(default_factory=_resource_dict)
     # Market trades, kept out of gathered/rates: amount bought and sold per resource.
     resource_bought: dict[str, int] = field(default_factory=_resource_dict)
+    # Spent on trained units, buildings and research, priced from the map's own
+    # cost table. The only source for iron (SC2 Terrazine), which replays do not
+    # record as a stockpile.
+    resource_spent: dict[str, int] = field(default_factory=_resource_dict)
+    # The research/age-up part of resource_spent (SC2 score fields leave research out).
+    resource_spent_research: dict[str, int] = field(default_factory=_resource_dict)
     resource_sold: dict[str, int] = field(default_factory=_resource_dict)
     resource_gathered_estimate: dict[str, int] = field(default_factory=_resource_dict)
     resource_lost_value: dict[str, int] = field(default_factory=_resource_dict)
@@ -250,6 +262,10 @@ class ReplaySummary:
     verdict: str | None = None
     # "recorded" (replay metadata), "leaves" (a whole side left) or None.
     result_source: str | None = None
+    # Which map cost table priced spending: "exact" (this map version),
+    # "fallback" (newest known version of the same map) or None (no table).
+    cost_table_match: str | None = None
+    cost_table_note: str | None = None
     turning_points: list[str] = field(default_factory=list)
     team_evaluations: list[str] = field(default_factory=list)
     animal_impact: list[str] = field(default_factory=list)

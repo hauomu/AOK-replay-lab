@@ -86,6 +86,13 @@ def _resource_cell(summary: ReplaySummary, resource: str, value: int | None) -> 
     return f"{int(value or 0):,}"
 
 
+def _iron_spent_cell(summary: ReplaySummary, value: int | None) -> str:
+    # Iron spent comes from the map cost table, not the tracker stockpile fields.
+    if not summary.cost_table_match:
+        return "n/a"
+    return f"{int(value or 0):,}"
+
+
 def _resource_triplet(summary: ReplaySummary, values: dict[str, int]) -> str:
     return ", ".join(
         f"{RESOURCE_LABELS[key]} {_resource_cell(summary, key, values.get(key, 0))}"
@@ -141,6 +148,8 @@ def _tech_economy_embed_lines(summary: ReplaySummary) -> list[str]:
             f"; stockpile {_resource_triplet(summary, team.resource_current)}"
             if summary.resource_channels_seen else ""
         )
+        if summary.cost_table_match:
+            resources += f"; iron spent {team.resource_spent['iron']:,}"
         lines.append(
             f"{_team_label_with_players(team, summary.match_mode)} — {team.current_age()}, tech {team.tech_score}, "
             f"mechanical {team.mechanical_kills}/{team.mechanical_losses}{resources}."
@@ -377,6 +386,7 @@ def _build_player_table_groups(summary: ReplaySummary) -> list[dict[str, Any]]:
                 _resource_cell(summary, "gold", p.resource_average_rate.get("gold", 0)),
                 _resource_cell(summary, "wood", p.resource_average_rate.get("wood", 0)),
                 _resource_cell(summary, "iron", p.resource_average_rate.get("iron", 0)),
+                _iron_spent_cell(summary, p.resource_spent.get("iron", 0)),
                 _resource_triplet(summary, p.resource_gathered_estimate),
             ]
             for p in group_players
@@ -458,6 +468,7 @@ def _build_timeline_table_groups(summary: ReplaySummary) -> list[dict[str, Any]]
                 _resource_cell(summary, "gold", values.get("gold_rate", 0)),
                 _resource_cell(summary, "wood", values.get("wood_rate", 0)),
                 _resource_cell(summary, "iron", values.get("iron_rate", 0)),
+                _iron_spent_cell(summary, values.get("iron_spent", 0)),
             ])
         if rows:
             groups.append({
@@ -598,6 +609,7 @@ def _build_report_tables(summary: ReplaySummary) -> dict[str, list[list[Any]]]:
             _resource_cell(summary, "gold", t.resource_average_rate.get("gold", 0)),
             _resource_cell(summary, "wood", t.resource_average_rate.get("wood", 0)),
             _resource_cell(summary, "iron", t.resource_average_rate.get("iron", 0)),
+            _iron_spent_cell(summary, t.resource_spent.get("iron", 0)),
             _resource_triplet(summary, t.resource_gathered_estimate),
         ]
         for t in teams
@@ -736,9 +748,9 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 
 ## Side resource overview
 
-AoK labels the replay channels as **Gold = minerals**, **Wood = vespene**, and **Iron = terrazine**. `n/a` means the replay protocol did not expose that channel; it is not a confirmed zero.
+AoK labels the replay channels as **Gold = minerals**, **Wood = vespene**, and **Iron = terrazine**. `n/a` means the replay protocol did not expose that channel; it is not a confirmed zero. Iron is SC2's Terrazine resource. Replays do not record its stockpile or income, so the Iron stockpile/rate columns read n/a. Iron spent is priced from the map version's own costs for trained units, started buildings (cancelled ones refunded) and completed research/age-ups; priced this way, gold and wood match the replay's recorded spending within about 3%.
 
-{{ table(['Side', 'Gold', 'Wood', 'Iron', 'Gold/min avg', 'Wood/min avg', 'Iron/min avg', 'Gathered estimate'], tables.side_resources, right=[1, 2, 3, 4, 5, 6]) }}
+{{ table(['Side', 'Gold', 'Wood', 'Iron', 'Gold/min avg', 'Wood/min avg', 'Iron/min avg', 'Iron spent', 'Gathered estimate'], tables.side_resources, right=[1, 2, 3, 4, 5, 6, 7]) }}
 {% endif %}
 
 {% if summary.animal_stats %}
@@ -766,7 +778,7 @@ These are cumulative 5-minute snapshots. They support the turning-point read but
 
 ### {{ group.label }} — technology + resources
 
-{{ table(['Time', 'Age', 'Tech', 'Mechanical K/L', 'Gold', 'Wood', 'Iron', 'Gold/min', 'Wood/min', 'Iron/min'], group.tech_resource_rows, right=[2, 4, 5, 6, 7, 8, 9]) }}
+{{ table(['Time', 'Age', 'Tech', 'Mechanical K/L', 'Gold', 'Wood', 'Iron', 'Gold/min', 'Wood/min', 'Iron/min', 'Iron spent'], group.tech_resource_rows, right=[2, 4, 5, 6, 7, 8, 9, 10]) }}
 
 {% endfor -%}
 {% endif %}
@@ -799,7 +811,7 @@ These are cumulative 5-minute snapshots. They support the turning-point read but
 {% for group in player_table_groups -%}
 ### {{ group.label }}
 
-{{ table(['Player', 'Gold', 'Wood', 'Iron', 'Gold/min avg', 'Wood/min avg', 'Iron/min avg', 'Gathered estimate'], group.resource_rows, right=[1, 2, 3, 4, 5, 6]) }}
+{{ table(['Player', 'Gold', 'Wood', 'Iron', 'Gold/min avg', 'Wood/min avg', 'Iron/min avg', 'Iron spent', 'Gathered estimate'], group.resource_rows, right=[1, 2, 3, 4, 5, 6, 7]) }}
 
 {% endfor -%}
 
@@ -887,7 +899,7 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 - Exact age costs and hard prerequisite chains still need AoK map metadata or TwoDie confirmation; inferred relationships are labelled as such.
 - FFA/no-alliance games are split into one analysis side per player; team games still aggregate allied players.
 - Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while gathering), because AoK leaves SC2's collection-rate field at 0. Starting stock and clear market trades are excluded (trades are listed separately).
-- Iron is shown as `n/a` when Terrazine fields are absent, rather than being silently treated as zero.
+- Iron is shown as `n/a` when Terrazine fields are absent, rather than being silently treated as zero. Iron is SC2's Terrazine resource. Replays do not record its stockpile or income, so the Iron stockpile/rate columns read n/a. Iron spent is priced from the map version's own costs for trained units, started buildings (cancelled ones refunded) and completed research/age-ups; priced this way, gold and wood match the replay's recorded spending within about 3%.
 - Role and tech-lead labels are heuristic reads based on observed events, timings, resources, units, structures, and combat conversion.
 """
 
@@ -1107,7 +1119,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
         lines.extend(["", "## Side technology overview", ""])
         lines.append(_markdown_table(["Side", "Age", "Tech score", "Tech structures", "Key unlocks", "Advanced unit types", "Mechanical K/L", "Trebs T/S/M-loss"], tables["side_tech"], right=[2, 3, 4, 5]))
         lines.extend(["", "## Side resource overview", ""])
-        lines.append(_markdown_table(["Side", "Gold", "Wood", "Iron", "Gold/min avg", "Wood/min avg", "Iron/min avg", "Gathered estimate"], tables["side_resources"], right=[1, 2, 3, 4, 5, 6]))
+        lines.append(_markdown_table(["Side", "Gold", "Wood", "Iron", "Gold/min avg", "Wood/min avg", "Iron/min avg", "Iron spent", "Gathered estimate"], tables["side_resources"], right=[1, 2, 3, 4, 5, 6, 7]))
         lines.append("")
 
     if summary.animal_stats:
@@ -1127,7 +1139,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
             lines.extend([f"### {group['label']}", ""])
             lines.append(_markdown_table(["Time", "PvP K/L", "Units born", "Animal K/D"], group["rows"], right=[2]))
             lines.extend(["", f"### {group['label']} — technology + resources", ""])
-            lines.append(_markdown_table(["Time", "Age", "Tech", "Mechanical K/L", "Gold", "Wood", "Iron", "Gold/min", "Wood/min", "Iron/min"], group["tech_resource_rows"], right=[2, 4, 5, 6, 7, 8, 9]))
+            lines.append(_markdown_table(["Time", "Age", "Tech", "Mechanical K/L", "Gold", "Wood", "Iron", "Gold/min", "Wood/min", "Iron/min", "Iron spent"], group["tech_resource_rows"], right=[2, 4, 5, 6, 7, 8, 9, 10]))
             lines.append("")
 
     if summary.players:
@@ -1146,7 +1158,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
         lines.extend(["## Player resource tracking", ""])
         for group in _build_player_table_groups(summary):
             lines.extend([f"### {group['label']}", ""])
-            lines.append(_markdown_table(["Player", "Gold", "Wood", "Iron", "Gold/min avg", "Wood/min avg", "Iron/min avg", "Gathered estimate"], group["resource_rows"], right=[1, 2, 3, 4, 5, 6]))
+            lines.append(_markdown_table(["Player", "Gold", "Wood", "Iron", "Gold/min avg", "Wood/min avg", "Iron/min avg", "Iron spent", "Gathered estimate"], group["resource_rows"], right=[1, 2, 3, 4, 5, 6, 7]))
             lines.append("")
         lines.extend(["## Player technology profiles", ""])
         for group in _build_player_table_groups(summary):
@@ -1176,7 +1188,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
         "- Exact age costs and hard prerequisite chains still need AoK map metadata or TwoDie confirmation; inferred relationships are labelled as such.",
         "- FFA/no-alliance games are split into one analysis side per player; team games still aggregate allied players.",
         "- Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while gathering), because AoK leaves SC2's collection-rate field at 0. Starting stock and clear market trades are excluded (trades are listed separately).",
-        "- Iron is shown as `n/a` when Terrazine fields are absent, rather than being silently treated as zero.",
+        "- Iron is shown as `n/a` when Terrazine fields are absent, rather than being silently treated as zero. Iron is SC2's Terrazine resource. Replays do not record its stockpile or income, so the Iron stockpile/rate columns read n/a. Iron spent is priced from the map version's own costs for trained units, started buildings (cancelled ones refunded) and completed research/age-ups; priced this way, gold and wood match the replay's recorded spending within about 3%.",
         "- Role and tech-lead labels are heuristic reads based on observed events, timings, resources, units, structures, and combat conversion.",
     ])
     return "\n".join(lines).strip() + "\n"

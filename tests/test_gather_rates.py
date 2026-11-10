@@ -154,7 +154,7 @@ class LikelyWinnerTests(unittest.TestCase):
             PlayerStats("A", team_id=0, result="Win", leave_time_seconds=100),
             PlayerStats("B", team_id=1, result="Undecided"),
         )
-        self.assertEqual([p.result for p in s.players], ["Win", "Undecided"])
+        self.assertEqual([p.result for p in s.players], ["Win", "Loss"])  # recorded Win: the other side lost
         self.assertIsNone(s.likely_winner_label())
 
 
