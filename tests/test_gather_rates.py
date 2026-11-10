@@ -7,7 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "discord_bot" / "sr
 try:
     from aok_bot.models import PlayerStats, ReplaySummary
     from aok_bot.replay_parser import (
-        _apply_leave_based_results, _build_team_stats, _derive_gather_rates,
+        LOOPS_PER_SECOND_BY_SPEED, _apply_leave_based_results, _build_team_stats, _derive_gather_rates,
+        _seconds_from_loops,
         _remove_starting_stock, _resource_sample_from_stats,
     )
 except ImportError as exc:  # pragma: no cover - optional runtime deps
@@ -155,6 +156,20 @@ class LikelyWinnerTests(unittest.TestCase):
         )
         self.assertEqual([p.result for p in s.players], ["Win", "Undecided"])
         self.assertIsNone(s.likely_winner_label())
+
+
+@unittest.skipIf(_derive_gather_rates is None, "replay parser dependencies unavailable")
+class ClockTests(unittest.TestCase):
+    def test_faster_speed_is_22_4_loops_per_real_second(self):
+        # AoK Legacy (8): 10,182 loops at Faster is 7:35 of real time, not 10:36.
+        self.assertEqual(_seconds_from_loops(10182), 455)
+        self.assertEqual(_seconds_from_loops(10182, LOOPS_PER_SECOND_BY_SPEED[4]), 455)
+
+    def test_normal_speed_is_16_loops_per_second(self):
+        self.assertEqual(_seconds_from_loops(1600, LOOPS_PER_SECOND_BY_SPEED[2]), 100)
+
+    def test_missing_loop_stays_missing(self):
+        self.assertIsNone(_seconds_from_loops(None))
 
 
 if __name__ == "__main__":

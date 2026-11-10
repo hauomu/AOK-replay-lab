@@ -101,10 +101,15 @@ def safe_str(value: Any, fallback: str = "") -> str:
     return str(value)
 
 
-def loops_to_seconds(loop: int | None) -> int | None:
+# Same table as the bot (aok_bot.replay_parser): loops per real second by m_gameSpeed.
+LOOPS_PER_SECOND_BY_SPEED = {0: 9.6, 1: 12.8, 2: 16.0, 3: 19.2, 4: 22.4}
+
+
+def loops_to_seconds(loop: int | None, loops_per_second: float = 22.4) -> int | None:
+    """Real seconds; AoK lobbies run at Faster speed (22.4 game loops per second)."""
     if loop is None:
         return None
-    return int(round(int(loop) / 16))
+    return int(round(int(loop) / loops_per_second))
 
 
 def has_any(text: str, hints: tuple[str, ...]) -> bool:
@@ -210,6 +215,7 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
                 "mapping verified against the local replay corpus.")
         ex.game_version = str(base_build)
         details = protocol.decode_replay_details(archive.read_file("replay.details"))
+        loops_per_second = LOOPS_PER_SECOND_BY_SPEED.get(details.get("m_gameSpeed"), 22.4)
         try:
             initdata = protocol.decode_replay_initdata(archive.read_file("replay.initData"))
         except Exception:
@@ -261,7 +267,7 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
                 elif name == "NNet.Game.STriggerPingEvent":
                     ping_counts[uid] += 1
                 elif name == "NNet.Game.SGameUserLeaveEvent":
-                    s = loops_to_seconds(loop)
+                    s = loops_to_seconds(loop, loops_per_second)
                     if s is not None:
                         leave_seconds[uid] = s
         except Exception as exc:
@@ -279,7 +285,7 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
             for ev in protocol.decode_replay_tracker_events(archive.read_file("replay.tracker.events")):
                 loop = int(ev.get("_gameloop", 0) or 0)
                 max_tracker_loop = max(max_tracker_loop, loop)
-                seconds = loops_to_seconds(loop)
+                seconds = loops_to_seconds(loop, loops_per_second)
                 minute = round((seconds or 0) / 60, 3)
                 evname = ev.get("_event")
                 if evname == "NNet.Replay.Tracker.SUnitBornEvent":
@@ -315,7 +321,7 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
                             unit_events.append({
                                 "replay_id": replay_id, "source_name": source, "event_type": "structure_done",
                                 "loop": loop, "seconds": seconds, "minute": minute,
-                                "init_loop": init_loop, "build_seconds": loops_to_seconds(loop - init_loop),
+                                "init_loop": init_loop, "build_seconds": loops_to_seconds(loop - init_loop, loops_per_second),
                                 "player_index": idx, "player_id": idx + 1, "player_name": players[idx]["name"],
                                 "team_id": players[idx]["team_id"], "unit_type": unit,
                                 **category_for_unit(unit),
@@ -366,7 +372,7 @@ def parse_replay_file(path: Path, source_name: str | None = None) -> ExtractedRe
             ex.tracker_events_complete = True
 
         ex.unit_events = unit_events
-        duration = loops_to_seconds(max(max_loop, max_tracker_loop))
+        duration = loops_to_seconds(max(max_loop, max_tracker_loop), loops_per_second)
         ex.duration_seconds = duration
         for event in unit_events:
             event["match_mode"] = ex.match_mode

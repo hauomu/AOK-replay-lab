@@ -207,11 +207,17 @@ def _decode_unit_type(value: Any) -> str:
     return (_safe_decode_string(value) or "UnknownUnit").strip() or "UnknownUnit"
 
 
-def _seconds_from_loops(game_loop: int | None) -> int | None:
+# Game loops per real second by details.m_gameSpeed (16 per second at Normal,
+# scaled by the speed multiplier). AoK lobbies run at Faster (4): 22.4, which
+# is also what SC2's in-game clock uses since Legacy of the Void.
+LOOPS_PER_SECOND_BY_SPEED = {0: 9.6, 1: 12.8, 2: 16.0, 3: 19.2, 4: 22.4}
+DEFAULT_LOOPS_PER_SECOND = 22.4
+
+
+def _seconds_from_loops(game_loop: int | None, loops_per_second: float = DEFAULT_LOOPS_PER_SECOND) -> int | None:
     if game_loop is None:
         return None
-    # SC2 replays commonly use 16 game loops per game second.
-    return int(round(game_loop / 16))
+    return int(round(game_loop / loops_per_second))
 
 
 def _time_label(seconds: int | None) -> str:
@@ -621,7 +627,9 @@ def _set_result_if_weaker(player: PlayerStats, result: str) -> None:
         player.result = result
 
 
-END_EXIT_SECONDS = 15
+# Closing exits: everyone quits in the final seconds. Tuned on the corpus as 15
+# game seconds at 16 loops/s, which is about 11 real seconds at Faster.
+END_EXIT_SECONDS = 11
 
 
 def _apply_leave_based_results(summary: ReplaySummary) -> None:
@@ -1237,6 +1245,10 @@ def parse_replay(path: Path) -> ReplaySummary:
         summary.game_version = str(base_build)
 
         details = protocol.decode_replay_details(archive.read_file("replay.details"))
+        loops_per_second = LOOPS_PER_SECOND_BY_SPEED.get(details.get("m_gameSpeed"), DEFAULT_LOOPS_PER_SECOND)
+
+        def secs(loop: int | None) -> int | None:
+            return _seconds_from_loops(loop, loops_per_second)
         try:
             initdata = protocol.decode_replay_initdata(archive.read_file("replay.initData"))
         except Exception:
@@ -1289,7 +1301,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                     elif event_name == "NNet.Game.STriggerPingEvent":
                         ping_counts[uid] += 1
                     elif event_name == "NNet.Game.SGameUserLeaveEvent":
-                        players[uid].leave_time_seconds = _seconds_from_loops(loop)
+                        players[uid].leave_time_seconds = secs(loop)
         except Exception as exc:
             summary.game_events_complete = False
             summary.warnings.append(f"Could not decode game events: {exc}. Command counts are partial; APM is unavailable.")
@@ -1298,7 +1310,7 @@ def parse_replay(path: Path) -> ReplaySummary:
 
         summary.raw_event_counts["game_events"] = game_event_count
         if max_loop:
-            summary.duration_seconds = _seconds_from_loops(max_loop)
+            summary.duration_seconds = secs(max_loop)
 
         for uid, player in enumerate(players):
             player.commands = int(command_counts.get(uid, 0))
@@ -1433,7 +1445,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                 tracker_count += 1
                 loop = int(event.get("_gameloop", 0) or 0)
                 max_tracker_loop = max(max_tracker_loop, loop)
-                event_seconds = _seconds_from_loops(loop)
+                event_seconds = secs(loop)
                 snapshot_until(event_seconds)
                 event_name = event.get("_event")
 
@@ -1585,7 +1597,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                         sample, seen_channels, seen_fields = _resource_sample_from_stats(event.get("m_stats", {}))
                         resource_channels_seen.update(seen_channels)
                         resource_fields_seen.update(seen_fields)
-                        sample_seconds = _seconds_from_loops(event.get("_gameloop"))
+                        sample_seconds = secs(event.get("_gameloop"))
                         _remove_starting_stock(starting_stock[id(player)], sample, sample_seconds)
                         _derive_gather_rates(gather_history[id(player)], sample, sample_seconds)
                         _apply_resource_sample(player, sample, sample_seconds)
@@ -1597,8 +1609,8 @@ def parse_replay(path: Path) -> ReplaySummary:
         summary.raw_event_counts["tracker_events"] = tracker_count
         summary.raw_event_counts["player_stats_events"] = player_stats_event_count
         summary.raw_event_counts["resource_fields_seen"] = len(resource_fields_seen)
-        if max_tracker_loop and (summary.duration_seconds is None or _seconds_from_loops(max_tracker_loop) > summary.duration_seconds):
-            summary.duration_seconds = _seconds_from_loops(max_tracker_loop)
+        if max_tracker_loop and (summary.duration_seconds is None or secs(max_tracker_loop) > summary.duration_seconds):
+            summary.duration_seconds = secs(max_tracker_loop)
         snapshot_until(summary.duration_seconds)
 
         summary.resource_channels_seen = sorted(resource_channels_seen, key=lambda key: ("gold", "wood", "iron").index(key))
