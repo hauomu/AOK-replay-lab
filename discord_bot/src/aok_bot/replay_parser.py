@@ -477,6 +477,62 @@ def _remove_starting_stock(
         values["gathered_estimate"] = max(0, raw - st["offset"])
 
 
+TRADE_MIN_BOUGHT = 300
+TRADE_MIN_SOLD = 150
+TRADE_SPIKE_FACTOR = 3
+TRADE_RATIO_RANGE = (0.4, 2.5)
+
+
+def _remove_market_trades(state: dict[str, Any], sample: dict[str, dict[str, int]]) -> None:
+    """Take market trades out of the gathered estimate.
+
+    A trade shows in one stats sample as a spike in one resource's stockpile
+    while another resource's stockpile drops without matching spending
+    (Used/Lost). Checked on the 269-replay corpus, small drops "unexplained by
+    spending" are common and are not trades (AoK triggers charge costs outside
+    the score fields), so only clear trades count: the bought resource jumps
+    by at least TRADE_MIN_BOUGHT and TRADE_SPIKE_FACTOR x its previous
+    sample's gain, the sold resource drops by at least TRADE_MIN_SOLD with
+    under 20% of the drop explained by spending, and bought/sold lies in
+    TRADE_RATIO_RANGE. The trade is removed from both resources' gathered
+    estimate (the bought side's spike and the sold side's dip) and recorded
+    as bought/sold volume instead.
+    """
+    prev = state.get("prev")
+    offsets = state.setdefault("offset", {})
+    now = {r: (int(v.get("gathered_estimate", 0) or 0), int(v.get("current", 0) or 0)) for r, v in sample.items()}
+    state["prev"] = now
+    gains = {}
+    if prev:
+        gains = {r: now[r][0] - prev[r][0] for r in now if r in prev}
+        prev_gain = state.get("gain", {})
+        cur_delta = {r: now[r][1] - prev[r][1] for r in now if r in prev}
+        for bought in gains:
+            for sold in gains:
+                if bought == sold:
+                    continue
+                d_bought, d_sold = cur_delta[bought], cur_delta[sold]
+                if d_bought < TRADE_MIN_BOUGHT or d_sold > -TRADE_MIN_SOLD:
+                    continue
+                spent_sold = max(0, gains[sold] - d_sold)  # Used/Lost growth on the sold side
+                unexplained = -d_sold - spent_sold
+                if unexplained < 0.8 * -d_sold:
+                    continue
+                normal = max(0, prev_gain.get(bought, 0))
+                if d_bought < TRADE_SPIKE_FACTOR * max(normal, 1):
+                    continue
+                if not TRADE_RATIO_RANGE[0] <= d_bought / -d_sold <= TRADE_RATIO_RANGE[1]:
+                    continue
+                bought_amount = max(0, gains[bought] - normal)
+                offsets[bought] = offsets.get(bought, 0) + bought_amount
+                offsets[sold] = offsets.get(sold, 0) - unexplained
+                sample[bought]["bought"] = sample[bought].get("bought", 0) + bought_amount
+                sample[sold]["sold"] = sample[sold].get("sold", 0) + unexplained
+        state["gain"] = {r: g - sample[r].get("bought", 0) for r, g in gains.items()}
+    for resource, values in sample.items():
+        values["gathered_estimate"] = max(0, now[resource][0] - offsets.get(resource, 0))
+
+
 def _derive_gather_rates(
     history: dict[str, deque[tuple[int, int]]],
     sample: dict[str, dict[str, int]],
@@ -525,6 +581,8 @@ def _apply_resource_sample(
         player.resource_peak_collection_rate[resource] = max(player.resource_peak_collection_rate.get(resource, 0), rate)
         player.resource_gathered_estimate[resource] = max(player.resource_gathered_estimate.get(resource, 0), gathered)
         player.resource_lost_value[resource] = max(player.resource_lost_value.get(resource, 0), lost)
+        player.resource_bought[resource] += int(values.get("bought", 0) or 0)
+        player.resource_sold[resource] += int(values.get("sold", 0) or 0)
 
 
 def _has_any(text: str, hints: tuple[str, ...]) -> bool:
@@ -858,6 +916,8 @@ def _build_team_stats(summary: ReplaySummary) -> None:
             team.resource_peak_collection_rate[resource] += int(p.resource_peak_collection_rate.get(resource, 0) or 0)
             team.resource_gathered_estimate[resource] += int(p.resource_gathered_estimate.get(resource, 0) or 0)
             team.resource_average_rate[resource] += p.resource_average_rate[resource]
+            team.resource_bought[resource] += p.resource_bought[resource]
+            team.resource_sold[resource] += p.resource_sold[resource]
             team.resource_lost_value[resource] += int(p.resource_lost_value.get(resource, 0) or 0)
 
     for team in teams.values():
@@ -909,7 +969,11 @@ def _build_tech_evaluations(summary: ReplaySummary) -> list[str]:
             f" Latest stockpile: {_resource_triplet(team.resource_current, summary.resource_channels_seen)}; "
             f"gather rate per minute: average {_resource_triplet(team.resource_average_rate, summary.resource_channels_seen)}, "
             f"peak {_resource_triplet(team.resource_peak_collection_rate, summary.resource_channels_seen)}; "
-            f"gathered estimate: {_resource_triplet(team.resource_gathered_estimate, summary.resource_channels_seen)}."
+            f"gathered estimate: {_resource_triplet(team.resource_gathered_estimate, summary.resource_channels_seen)}"
+            + (f"; market trades (not counted as gathered): bought {_resource_triplet(team.resource_bought, summary.resource_channels_seen)}, "
+               f"sold {_resource_triplet(team.resource_sold, summary.resource_channels_seen)}"
+               if any(team.resource_bought.values()) else "")
+            + "."
             if resources_available else
             " Resource tracker fields were not available in this replay."
         )
@@ -1361,6 +1425,7 @@ def parse_replay(path: Path) -> ReplaySummary:
         player_stats_event_count = 0
         gather_history: dict[int, dict[str, deque[tuple[int, int]]]] = defaultdict(dict)
         starting_stock: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
+        market_state: dict[int, dict[str, Any]] = defaultdict(dict)
         team_peak_rate: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         last_stats_loop: list[int | None] = [None]
 
@@ -1650,6 +1715,7 @@ def parse_replay(path: Path) -> ReplaySummary:
                         resource_fields_seen.update(seen_fields)
                         sample_seconds = secs(event.get("_gameloop"))
                         _remove_starting_stock(starting_stock[id(player)], sample, sample_seconds)
+                        _remove_market_trades(market_state[id(player)], sample)
                         _derive_gather_rates(gather_history[id(player)], sample, sample_seconds)
                         _apply_resource_sample(player, sample, sample_seconds)
                         refresh_side_state(player)

@@ -20,11 +20,13 @@ class Settings:
     input_limits: ReplayLimits = ReplayLimits()
     max_active_jobs: int = 2
     download_timeout: float = 60
+    replay_cache_days: int = 30
 
     def __post_init__(self):
         if (type(self.max_active_jobs) is not int or self.max_active_jobs < 1
                 or type(self.download_timeout) not in (int, float)
-                or not 0 < self.download_timeout < math.inf):
+                or not 0 < self.download_timeout < math.inf
+                or type(self.replay_cache_days) is not int or self.replay_cache_days < 1):
             raise ValueError("Invalid bot limits")
 
     @property
@@ -66,6 +68,7 @@ def load_settings() -> Settings:
         sc2arcade_map_id=int(os.getenv("SC2ARCADE_MAP_ID", "131901")),
         database_path=database_path,
         data_dir=data_dir,
+        replay_cache_days=int(os.getenv("REPLAY_CACHE_DAYS", "30")),
     )
 
     for path in [

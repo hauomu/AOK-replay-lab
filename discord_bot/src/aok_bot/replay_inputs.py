@@ -170,6 +170,7 @@ def extract_replay_paths(input_path: Path, replays_dir: Path,
                 with out.open("rb") as existing:
                     if _digest(existing) != digest:
                         raise ReplayInputError("Cache integrity check failed")
+                os.utime(out)  # cache hit: keep it clear of the age-based sweep
             if out not in found:
                 found.append(out)
         return found

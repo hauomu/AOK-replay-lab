@@ -11,6 +11,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 
+from .retention import sweep
 from .config import load_settings
 from .replay_inputs import extract_replay_paths
 from .replay_worker import parse_replay_isolated
@@ -108,6 +109,7 @@ async def save_attachment(attachment: discord.Attachment) -> Path:
 
 @client.event
 async def on_ready():
+    await _sweep_scratch()
     guild = guild_object()
     if guild is not None:
         tree.copy_global_to(guild=guild)
@@ -192,8 +194,20 @@ def _public_warning(warning: str) -> str:
     return "Some replay data could not be analyzed reliably."
 
 
+async def _sweep_scratch() -> None:
+    try:
+        result = await asyncio.to_thread(
+            sweep, settings.uploads_dir, settings.reports_dir, settings.replays_dir, settings.replay_cache_days)
+        if result.total():
+            print(f"Cleanup: removed {result.uploads} upload(s), {result.reports} report(s), "
+                  f"{result.replays} cached replay(s)")
+    except Exception as exc:  # cleanup must never break the bot
+        print(f"Cleanup failed: {type(exc).__name__}")
+
+
 async def _analyze_job(interaction, replay, mode):
     upload_path = None
+    completed = []
     try:
         await interaction.response.defer(thinking=True)
         upload_path = await save_attachment(replay)
@@ -251,6 +265,13 @@ async def _analyze_job(interaction, replay, mode):
     finally:
         if upload_path is not None:
             upload_path.unlink(missing_ok=True)
+        # Reports live on in the Discord message; the local copies are not needed.
+        for _, report in completed:
+            try:
+                Path(report).unlink(missing_ok=True)
+            except OSError:
+                pass
+        await _sweep_scratch()
 
 
 @tree.command(name="aok_player", description="Show local profile stats for a player from uploaded replays.")

@@ -103,6 +103,9 @@ class PlayerStats:
     resource_peak_current: dict[str, int] = field(default_factory=_resource_dict)
     resource_peak_collection_rate: dict[str, int] = field(default_factory=_resource_dict)
     resource_average_rate: dict[str, int] = field(default_factory=_resource_dict)
+    # Market trades, kept out of gathered/rates: amount bought and sold per resource.
+    resource_bought: dict[str, int] = field(default_factory=_resource_dict)
+    resource_sold: dict[str, int] = field(default_factory=_resource_dict)
     resource_gathered_estimate: dict[str, int] = field(default_factory=_resource_dict)
     resource_lost_value: dict[str, int] = field(default_factory=_resource_dict)
     resource_samples: int = 0
@@ -192,6 +195,9 @@ class TeamStats:
     resource_peak_current: dict[str, int] = field(default_factory=_resource_dict)
     resource_peak_collection_rate: dict[str, int] = field(default_factory=_resource_dict)
     resource_average_rate: dict[str, int] = field(default_factory=_resource_dict)
+    # Market trades, kept out of gathered/rates: amount bought and sold per resource.
+    resource_bought: dict[str, int] = field(default_factory=_resource_dict)
+    resource_sold: dict[str, int] = field(default_factory=_resource_dict)
     resource_gathered_estimate: dict[str, int] = field(default_factory=_resource_dict)
     resource_lost_value: dict[str, int] = field(default_factory=_resource_dict)
 
