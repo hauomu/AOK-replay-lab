@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -52,6 +53,9 @@ CREATE TABLE IF NOT EXISTS replay_players (
 CREATE INDEX IF NOT EXISTS idx_replay_players_name ON replay_players(name);
 """
 
+# Battle.net handle as stored in replay_players.account_id, e.g. "2-S2-1-8333926".
+ACCOUNT_HANDLE = re.compile(r"^\d+-[A-Za-z0-9]+-\d+-\d+$")
+
 # Failed parses keep their diagnostic rows but never feed public profiles or leaderboards.
 SUCCESSFUL_PLAYERS = """
     replay_players p JOIN replays r ON r.id = p.replay_id AND r.parser_ok = 1
@@ -60,10 +64,6 @@ SUCCESSFUL_PLAYERS = """
 
 def _ratio(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 3) if denominator else None
-
-
-def _escape_like(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class Storage:
@@ -99,6 +99,9 @@ class Storage:
             self._ensure_column(conn, "replay_players", "gold_gathered", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "replay_players", "wood_gathered", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "replay_players", "iron_gathered", "INTEGER NOT NULL DEFAULT 0")
+            # Players are identified by Battle.net account; rows saved before this have NULL.
+            self._ensure_column(conn, "replay_players", "account_id", "TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_replay_players_account ON replay_players(account_id)")
 
     def save_replay(self, summary: ReplaySummary) -> int:
         with closing(self.connect()) as conn, conn:
@@ -145,8 +148,8 @@ class Storage:
                         tech_score, current_age,
                         gold_current, wood_current, iron_current,
                         gold_gathered, wood_gathered, iron_gathered,
-                        leave_time_seconds
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        leave_time_seconds, account_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         replay_id,
@@ -172,30 +175,69 @@ class Storage:
                         int(p.resource_gathered_estimate.get("wood", 0) or 0),
                         int(p.resource_gathered_estimate.get("iron", 0) or 0),
                         p.leave_time_seconds,
+                        p.account_id,
                     ),
                 )
             return replay_id
 
+    def _identities(self, conn: sqlite3.Connection) -> dict[str, dict]:
+        """Group successful player rows into people. A Battle.net account is one
+        person whatever names it used; two accounts sharing a name stay apart.
+        Rows saved before account ids were stored join the one account that used
+        that name, or stand alone under the exact name when none or several did."""
+        rows = conn.execute(
+            f"SELECT p.id, p.name, p.account_id FROM {SUCCESSFUL_PLAYERS} ORDER BY p.id"
+        ).fetchall()
+        accounts_by_name: dict[str, set[str]] = {}
+        for r in rows:
+            if r["account_id"]:
+                accounts_by_name.setdefault(r["name"].casefold(), set()).add(r["account_id"])
+        people: dict[str, dict] = {}
+        for r in rows:
+            key = r["account_id"]
+            if not key:
+                owners = accounts_by_name.get(r["name"].casefold(), set())
+                key = next(iter(owners)) if len(owners) == 1 else f"name:{r['name']}"
+            person = people.setdefault(key, {
+                "account_id": None if key.startswith("name:") else key,
+                "row_ids": [], "names": [], "name": r["name"],
+            })
+            person["row_ids"].append(int(r["id"]))
+            if r["name"] not in person["names"]:
+                person["names"].append(r["name"])
+            person["name"] = r["name"]  # rows come in id order, so the latest name wins
+        return people
+
+    @staticmethod
+    def _label(person: dict) -> str:
+        return f"{person['name']} [{person['account_id']}]" if person["account_id"] else person["name"]
+
+    @staticmethod
+    def _find_people(people: dict[str, dict], query: str) -> list[dict]:
+        query = query.strip()
+        if ACCOUNT_HANDLE.match(query):
+            return [people[query]] if query in people else []
+        folded = query.casefold()
+        exact = [p for p in people.values() if any(n.casefold() == folded for n in p["names"])]
+        if exact:
+            return exact
+        return [p for p in people.values() if any(folded in n.casefold() for n in p["names"])]
+
     def player_profile(self, name: str) -> dict:
-        """Profile one player. An exact (case-insensitive) name wins; a partial
-        match is used only when it identifies a single player, so different
-        players sharing a substring are never merged."""
+        """Profile one person. An exact (case-insensitive) name wins over a partial
+        one, and a Battle.net handle ("2-S2-1-1234") picks an account directly.
+        When the name fits several people nothing is merged: the candidates come
+        back in "matches" so the caller can ask for the handle."""
         with closing(self.connect()) as conn, conn:
-            names = [r[0] for r in conn.execute(
-                f"SELECT DISTINCT p.name FROM {SUCCESSFUL_PLAYERS} WHERE p.name = ? COLLATE NOCASE",
-                (name,),
-            )]
-            if not names:
-                names = [r[0] for r in conn.execute(
-                    f"SELECT DISTINCT p.name FROM {SUCCESSFUL_PLAYERS} WHERE p.name LIKE ? ESCAPE '\\' "
-                    "ORDER BY p.name LIMIT 11",
-                    (f"%{_escape_like(name)}%",),
-                )]
-            if len(names) != 1:
-                return {"name": name, "games": 0, "matches": names}
+            people = self._identities(conn)
+            found = self._find_people(people, name)
+            if len(found) != 1:
+                return {"name": name, "games": 0, "matches": sorted(self._label(p) for p in found)[:11]}
+            person = found[0]
+            ids = person["row_ids"]
             rows = conn.execute(
-                f"SELECT p.* FROM {SUCCESSFUL_PLAYERS} WHERE p.name = ? ORDER BY p.id DESC",
-                (names[0],),
+                f"SELECT * FROM replay_players WHERE id IN ({','.join('?' * len(ids))}) ORDER BY id DESC",
+                ids,
             ).fetchall()
 
         total_kills = sum(int(r["kills"] or 0) for r in rows)
@@ -218,7 +260,9 @@ class Storage:
             results[key] = results.get(key, 0) + 1
 
         return {
-            "name": names[0],
+            "name": person["name"],
+            "account_id": person["account_id"],
+            "other_names": [n for n in person["names"] if n != person["name"]],
             "games": len(rows),
             "kills": total_kills,
             "losses": total_losses,
@@ -241,42 +285,41 @@ class Storage:
 
     def leaderboard(self, limit: int = 10) -> list[dict]:
         with closing(self.connect()) as conn, conn:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    p.name AS name,
-                    COUNT(*) AS games,
-                    TOTAL(p.kills) AS kills,
-                    TOTAL(p.losses) AS losses,
-                    TOTAL(p.animal_kills) AS animal_kills,
-                    TOTAL(p.deaths_to_animals) AS deaths_to_animals,
-                    TOTAL(p.units_born) AS units_born,
-                    TOTAL(p.commands) AS commands,
-                    AVG(p.apm) AS avg_apm
-                FROM {SUCCESSFUL_PLAYERS}
-                GROUP BY p.name
-                ORDER BY kills DESC, animal_kills DESC, games DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            people = self._identities(conn)
+            stats = {
+                int(r["id"]): r for r in conn.execute(
+                    "SELECT p.id, p.kills, p.losses, p.animal_kills, p.deaths_to_animals, "
+                    f"p.units_born, p.commands, p.apm FROM {SUCCESSFUL_PLAYERS}"
+                )
+            }
+        shown: dict[str, int] = {}
+        for person in people.values():
+            shown[person["name"].casefold()] = shown.get(person["name"].casefold(), 0) + 1
         result = []
-        for r in rows:
-            kills, losses = int(r["kills"]), int(r["losses"])
-            animal_kills, deaths_to_animals = int(r["animal_kills"]), int(r["deaths_to_animals"])
+        for person in people.values():
+            rows = [stats[i] for i in person["row_ids"]]
+            kills = sum(int(r["kills"] or 0) for r in rows)
+            losses = sum(int(r["losses"] or 0) for r in rows)
+            animal_kills = sum(int(r["animal_kills"] or 0) for r in rows)
+            deaths_to_animals = sum(int(r["deaths_to_animals"] or 0) for r in rows)
+            apms = [int(r["apm"]) for r in rows if r["apm"] is not None]
+            # People showing the same name get their handle so they can be told apart.
+            same_name = shown[person["name"].casefold()] > 1
             result.append(
                 {
-                    "name": r["name"],
-                    "games": int(r["games"]),
+                    "name": self._label(person) if same_name else person["name"],
+                    "account_id": person["account_id"],
+                    "games": len(rows),
                     "kills": kills,
                     "losses": losses,
                     "klr": _ratio(kills, losses),
                     "animal_kills": animal_kills,
                     "deaths_to_animals": deaths_to_animals,
                     "animal_klr": _ratio(animal_kills, deaths_to_animals),
-                    "units_born": int(r["units_born"]),
-                    "commands": int(r["commands"]),
-                    "avg_apm": round(float(r["avg_apm"]), 1) if r["avg_apm"] is not None else None,
+                    "units_born": sum(int(r["units_born"] or 0) for r in rows),
+                    "commands": sum(int(r["commands"] or 0) for r in rows),
+                    "avg_apm": round(sum(apms) / len(apms), 1) if apms else None,
                 }
             )
-        return result
+        result.sort(key=lambda r: (-r["kills"], -r["animal_kills"], -r["games"], r["name"]))
+        return result[:limit]
