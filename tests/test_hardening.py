@@ -363,7 +363,8 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             upload = Path(directory) / "upload.zip"
             upload.write_bytes(b"x")
-            settings = SimpleNamespace(replays_dir=Path(directory), reports_dir=Path(directory), input_limits=inputs.DEFAULT_LIMITS)
+            settings = SimpleNamespace(replays_dir=Path(directory), reports_dir=Path(directory), input_limits=inputs.DEFAULT_LIMITS,
+                                       uploads_dir=Path(directory), replay_cache_days=30)
             history = SimpleNamespace(save_replay=unittest.mock.Mock())
             summary = ReplaySummary(Path("x"), warnings=["Replay parse failed: private/path?token=secret"])
             report = Path(directory) / "report.md"
@@ -382,7 +383,9 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("private", message)
                 self.assertNotIn("private", str(render.call_args.args[0].warnings))
                 self.assertFalse(upload.exists())
+                self.assertFalse(report.exists())  # sent reports are not kept on disk
             upload.write_bytes(b"new request")
+            report.write_text("report")
             history.save_replay.side_effect = sqlite3.OperationalError("private database path")
             with patch.object(bot, "settings", settings), patch.object(bot, "storage", history), \
                  patch.object(bot, "save_attachment", AsyncMock(return_value=upload)), \
