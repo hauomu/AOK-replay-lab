@@ -292,7 +292,7 @@ async def _analyze_job(interaction, replay, mode):
 
 
 @tree.command(name="aok_player", description="Show local profile stats for a player from uploaded replays.")
-@app_commands.describe(name="Player name or partial name")
+@app_commands.describe(name="Player name, partial name, or Battle.net handle such as 2-S2-1-1234")
 async def aok_player(interaction: discord.Interaction, name: str):
     await interaction.response.defer(thinking=True)
     try:
@@ -304,14 +304,18 @@ async def aok_player(interaction: discord.Interaction, name: str):
         matches = profile.get("matches") or []
         if len(matches) > 1:
             shown = ", ".join(matches[:10]) + (", …" if len(matches) > 10 else "")
-            message = f"Several players match that name; use the full name: {shown}"
+            message = f"Several players match that name; use the full name or the handle in brackets: {shown}"
         else:
             message = "No local replay stats found for that player yet."
         await interaction.followup.send(discord.utils.escape_mentions(message)[:1900])
         return
 
-    lines = [
-        f"**{profile['name']} AoK profile**",
+    lines = [f"**{profile['name']} AoK profile**"]
+    if profile.get("account_id"):
+        lines.append(f"Battle.net handle: `{profile['account_id']}`")
+    if profile.get("other_names"):
+        lines.append("Also played as: " + ", ".join(profile["other_names"][:10]))
+    lines += [
         f"Games in local database: **{profile['games']}**",
         f"PvP kills/losses: **{profile['kills']} / {profile['losses']}**",
         f"PvP K/L ratio: **{profile['kill_loss_ratio']}**",

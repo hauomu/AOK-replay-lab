@@ -204,6 +204,23 @@ def _clean_player_name(value: Any, fallback: str) -> str:
     return text or fallback
 
 
+def _account_handle(toon: Any) -> str | None:
+    """Battle.net handle "region-S2-realm-id" from details.m_toon, or None for
+    computers and empty slots (id 0)."""
+    if not isinstance(toon, dict):
+        return None
+    try:
+        account = int(toon.get("m_id") or 0)
+        region = int(toon.get("m_region") or 0)
+        realm = int(toon.get("m_realm") or 0)
+    except (TypeError, ValueError):
+        return None
+    if account <= 0 or region <= 0:
+        return None
+    program = (_safe_decode_string(toon.get("m_programId")) or "S2").strip("\x00").strip() or "S2"
+    return f"{region}-{program}-{realm}-{account}"
+
+
 def _decode_unit_type(value: Any) -> str:
     return (_safe_decode_string(value) or "UnknownUnit").strip() or "UnknownUnit"
 
@@ -1573,7 +1590,9 @@ def parse_replay(path: Path) -> ReplaySummary:
                 result_code,
                 str(result_code) if result_code is not None else None,
             )
-            players.append(PlayerStats(name=name, team_id=team_id, result=result, is_computer=p.get("m_control") == 3))
+            is_computer = p.get("m_control") == 3
+            players.append(PlayerStats(name=name, team_id=team_id, result=result, is_computer=is_computer,
+                                       account_id=None if is_computer else _account_handle(p.get("m_toon"))))
         summary.players = players
         _normalize_match_mode(summary)
 

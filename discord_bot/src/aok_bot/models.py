@@ -26,6 +26,8 @@ class PlayerStats:
     result: str | None = None
     # details.m_control: 2 = human, 3 = computer. Computers never leave.
     is_computer: bool = False
+    # Battle.net account handle "region-S2-realm-id" from details.m_toon; names are not unique.
+    account_id: str | None = None
     apm: int | None = None
     commands: int = 0
     control_groups: int = 0

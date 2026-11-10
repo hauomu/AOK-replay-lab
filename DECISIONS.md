@@ -21,4 +21,6 @@ Why it is this way. Numbered; amend in place, add new entries for reversals.
 
 6. **Food is supply** (user definition, 2026-11-10): read FoodUsed/FoodMade from the replay; population limit is a lobby option (100-400) inferred from peak food in use.
 
+8. **Player identity = Battle.net account** (2026-11-10): `replay_players.account_id` holds the handle `region-S2-realm-id` from `details.m_toon`. One account is one profile across renames (latest name shown); same-name accounts stay apart and are told apart by handle. Rows without an account id join the single account that used that name, otherwise stand alone under the exact name. Old rows are backfilled by `scripts/backfill_account_ids.py` (match by player-name list + duration).
+
 7. **Delegation:** Codex models only via the Codex plugin companion; ocx agents are blocked by a PreToolUse hook that redirects them to the plugin.
