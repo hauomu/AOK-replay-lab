@@ -111,10 +111,23 @@ class PlayerStats:
     resource_spent: dict[str, int] = field(default_factory=_resource_dict)
     # The research/age-up part of resource_spent (SC2 score fields leave research out).
     resource_spent_research: dict[str, int] = field(default_factory=_resource_dict)
+    # Spending split by what it bought: Army, Economy, Buildings & defense,
+    # Research, Ages -> {gold, wood, iron, food}.
+    spending_by_category: dict[str, dict[str, int]] = field(default_factory=dict)
     resource_sold: dict[str, int] = field(default_factory=_resource_dict)
     resource_gathered_estimate: dict[str, int] = field(default_factory=_resource_dict)
     resource_lost_value: dict[str, int] = field(default_factory=_resource_dict)
     resource_samples: int = 0
+
+    # Food is supply: houses raise the cap, units use it, a dead unit frees it,
+    # a lost house lowers the cap. Recorded directly (SC2 FoodUsed/FoodMade).
+    food_used: int = 0
+    food_cap: int = 0
+    food_used_peak: int = 0
+    food_cap_peak: int = 0
+    supply_capped_seconds: int = 0
+    food_cap_lost: int = 0
+    food_samples: list[list[int]] = field(default_factory=list)  # [seconds, used, cap]
     resource_last_gain_seconds: int | None = None
 
     def kill_loss_ratio(self) -> float | None:
@@ -209,6 +222,9 @@ class TeamStats:
     resource_spent: dict[str, int] = field(default_factory=_resource_dict)
     # The research/age-up part of resource_spent (SC2 score fields leave research out).
     resource_spent_research: dict[str, int] = field(default_factory=_resource_dict)
+    # Spending split by what it bought: Army, Economy, Buildings & defense,
+    # Research, Ages -> {gold, wood, iron, food}.
+    spending_by_category: dict[str, dict[str, int]] = field(default_factory=dict)
     resource_sold: dict[str, int] = field(default_factory=_resource_dict)
     resource_gathered_estimate: dict[str, int] = field(default_factory=_resource_dict)
     resource_lost_value: dict[str, int] = field(default_factory=_resource_dict)
@@ -248,6 +264,10 @@ class ReplaySummary:
     teams: list[TeamStats] = field(default_factory=list)
     animal_stats: PlayerStats | None = None
     timeline_snapshots: list[dict[str, Any]] = field(default_factory=list)
+    # Per-team economy/army series for the chart (about every 30 s) and the
+    # biggest fights by value swing, with exact replay timestamps.
+    economy_series: list[dict[str, Any]] = field(default_factory=list)
+    fights: list[dict[str, Any]] = field(default_factory=list)
     raw_event_counts: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     parser_ok: bool = False
@@ -266,6 +286,8 @@ class ReplaySummary:
     # "fallback" (newest known version of the same map) or None (no table).
     cost_table_match: str | None = None
     cost_table_note: str | None = None
+    # Lobby population limit (map option 100-400), inferred from food in use.
+    population_limit: int | None = None
     turning_points: list[str] = field(default_factory=list)
     team_evaluations: list[str] = field(default_factory=list)
     animal_impact: list[str] = field(default_factory=list)

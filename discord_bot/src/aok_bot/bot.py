@@ -15,7 +15,7 @@ from .retention import sweep
 from .config import load_settings
 from .replay_inputs import extract_replay_paths
 from .replay_worker import parse_replay_isolated
-from .reporting import make_match_embed, save_markdown_report, validate_mode
+from .reporting import make_match_embed, save_markdown_report, save_timeline_chart, validate_mode
 from .sc2arcade_client import SC2ArcadeClient
 from .storage import Storage
 
@@ -227,25 +227,39 @@ async def _analyze_job(interaction, replay, mode):
             except Exception:
                 failed += 1
                 continue
+            chart = await asyncio.to_thread(save_timeline_chart, public, settings.reports_dir)
             try:
                 await asyncio.to_thread(storage.save_replay, summary)
             except Exception:
                 unsaved += 1
-            completed.append((public, report))
+            completed.append((public, report, chart))
         if not completed:
             await interaction.followup.send("No replay reports could be generated. The upload may be invalid or exceed analysis limits.")
             return
         # The snapshot embed uses public warnings only; embed text never pings anyone.
         embed = make_match_embed(completed[0][0])
-        ok = sum(s.parser_ok for s, _ in completed)
+        ok = sum(s.parser_ok for s, _, _ in completed)
         message = f"Generated {len(completed)} report(s); {ok} analyzed successfully; {failed} failed."
         if unsaved:
             message += f" {unsaved} report(s) could not be saved to history."
         if skipped:
             message += f" {skipped} replay(s) were skipped to stay within Discord's time limit; upload them separately."
-        if len(completed) > MAX_ATTACHMENTS:
-            message += f" Only the first {MAX_ATTACHMENTS} reports are attached."
-        reports = [report for _, report in completed[:MAX_ATTACHMENTS]]
+        # Each report with its timeline chart while there is room (10 files per message);
+        # the first replay's chart is also shown inside the embed.
+        files: list[Path] = []
+        for index, (_, report, chart) in enumerate(completed):
+            if len(files) >= MAX_ATTACHMENTS:
+                break
+            files.append(Path(report))
+            # Charts for the first five replays, so at least five reports always fit.
+            if chart and len(files) < MAX_ATTACHMENTS and index < MAX_ATTACHMENTS // 2:
+                files.append(Path(chart))
+        attached_reports = sum(1 for _, report, _ in completed if Path(report) in files)
+        if attached_reports < len(completed):
+            message += f" Only the first {attached_reports} reports are attached."
+        if completed[0][2] and Path(completed[0][2]) in files:
+            embed.set_image(url=f"attachment://{Path(completed[0][2]).name}")
+        reports = files
         attachments = [discord.File(report) for report in reports]
         try:
             await interaction.followup.send(message, embed=embed, files=attachments,
@@ -265,12 +279,15 @@ async def _analyze_job(interaction, replay, mode):
     finally:
         if upload_path is not None:
             upload_path.unlink(missing_ok=True)
-        # Reports live on in the Discord message; the local copies are not needed.
-        for _, report in completed:
-            try:
-                Path(report).unlink(missing_ok=True)
-            except OSError:
-                pass
+        # Reports and charts live on in the Discord message; the local copies are not needed.
+        for _, report, chart in completed:
+            for path in (report, chart):
+                if path is None:
+                    continue
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
         await _sweep_scratch()
 
 

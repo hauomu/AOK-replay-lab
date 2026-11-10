@@ -61,6 +61,7 @@ def _read(archive, suffix: str) -> bytes | None:
 def cost_table(mpyq, map_path: Path) -> dict[str, dict[str, dict[str, int]]]:
     archive = mpyq.MPQArchive(str(map_path))
     units: dict[str, dict[str, int]] = {}
+    categories: dict[str, str] = {}
     research: dict[str, dict[str, int]] = {}
     unit_xml = _read(archive, "GameData/UnitData.xml")
     if unit_xml:
@@ -68,6 +69,9 @@ def cost_table(mpyq, map_path: Path) -> dict[str, dict[str, dict[str, int]]]:
             costs = _costs(el)
             if el.get("id") and costs:
                 units[el.get("id")] = costs
+                category = el.find("CostCategory")
+                if category is not None and category.get("value"):
+                    categories[el.get("id")] = category.get("value")  # Army / Economy / Technology
     abil_xml = _read(archive, "GameData/AbilData.xml")
     if abil_xml:
         for el in ET.fromstring(abil_xml):
@@ -77,7 +81,8 @@ def cost_table(mpyq, map_path: Path) -> dict[str, dict[str, dict[str, int]]]:
                 costs = _costs(info)
                 if upgrade and costs:
                     research[upgrade] = costs
-    return {"units": dict(sorted(units.items())), "research": dict(sorted(research.items()))}
+    return {"units": dict(sorted(units.items())), "categories": dict(sorted(categories.items())),
+            "research": dict(sorted(research.items()))}
 
 
 def main() -> None:
