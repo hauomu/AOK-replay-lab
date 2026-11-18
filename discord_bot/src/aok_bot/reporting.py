@@ -802,6 +802,13 @@ def _build_report_tables(summary: ReplaySummary) -> dict[str, list[list[Any]]]:
     }
 
 
+# Discord previews only the start of a text attachment; this sits above that cut.
+PREVIEW_NOTICE = (
+    "> **Full report:** Discord's file preview stops after about 50 KB, so long reports look cut off there. "
+    "Download this file to read every section."
+)
+
+
 REPORT_TEMPLATE = r"""# AoK Replay Analysis
 
 | Field | Value |
@@ -814,6 +821,8 @@ REPORT_TEMPLATE = r"""# AoK Replay Analysis
 | Game version/build | {{ (summary.game_version or 'Unknown') | md }} |
 | Parser OK | {{ summary.parser_ok }} |
 | Report format | Jinja2 compact table layout |
+
+{{ preview_notice }}
 
 {% if summary.verdict %}
 ## Short verdict
@@ -928,23 +937,6 @@ AoK labels the replay channels as **Gold = minerals**, **Wood = vespene**, and *
 {{ table(['Player', 'Side', 'Animal kills', 'Deaths to animals', 'Animal K/D'], tables.animal_rows, right=[2, 3, 4]) }}
 {% endif %}
 
-{% if summary.timeline_snapshots %}
-## Timeline snapshots
-
-These are cumulative 5-minute snapshots. They support the turning-point read but should be treated as replay-protocol evidence, not visual map observation.
-
-{% for group in timeline_table_groups -%}
-### {{ group.label }} — combat
-
-{{ table(['Time', 'PvP K/L', 'Units born', 'Animal K/D'], group.rows, right=[2]) }}
-
-### {{ group.label }} — technology + resources
-
-{{ table(['Time', 'Age', 'Tech', 'Mechanical K/L', 'Gold', 'Wood', 'Iron', 'Gold/min', 'Wood/min', 'Iron/min', 'Iron spent'], group.tech_resource_rows, right=[2, 4, 5, 6, 7, 8, 9, 10]) }}
-
-{% endfor -%}
-{% endif %}
-
 {% if summary.players %}
 ## Player overview
 
@@ -1008,39 +1000,6 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 
 {% endfor -%}
 
-## Player composition detail
-
-{% for p in players_by_combat %}
-### {{ player_with_side(summary, p) }}
-
-- **Role read:** {{ p.role_label or 'Unknown' }}
-- **PvP combat:** {{ p.kills }} kills / {{ p.losses }} losses, K/L {{ ratio(p.kills, p.losses) }}
-- **Animal interaction:** {{ p.animal_kills }} animal kills / {{ p.deaths_to_animals }} deaths to animals
-- **Activity:** {{ p.commands }} commands, {{ p.control_groups }} control-group events, {{ p.pings }} pings, {{ p.chat_messages }} chat messages
-- **Production:** {{ p.units_born }} units born, {{ p.structures_done }} completed structures, {{ p.upgrades }} raw upgrade events
-- **Technology:** {{ p.current_age() }}, tech score {{ p.tech_score }}
-- **Age progression:** {{ age_timing_items(p) }}
-- **Tech structures by age:** {{ timed_items_with_age(p.tech_structure_first_seconds, tech_structure_labels, p.tech_structure_age_labels, 6) }}
-- **Key unlocks:** {{ timed_items_with_age(p.tech_unlock_first_seconds, unlock_labels, p.tech_upgrade_age_labels, 6) }}
-- **Gameplay upgrades by observed age:** {{ timed_items_with_age(p.tech_upgrade_first_seconds, empty_labels, p.tech_upgrade_age_labels, 10) }}
-- **Advanced units:** {{ timed_items_with_age(p.advanced_unit_first_seconds, advanced_unit_labels, p.advanced_unit_age_labels, 8) }}
-- **Inferred unit requirements:** {{ advanced_requirement_items(p) }}
-- **Resources:** current {{ resource_triplet(summary, p.resource_current) }}; gather per minute avg {{ resource_triplet(summary, p.resource_average_rate) }}, peak {{ resource_triplet(summary, p.resource_peak_collection_rate) }}; gathered estimate {{ resource_triplet(summary, p.resource_gathered_estimate) }}
-- **Mechanical:** {{ p.mechanical_units }} assets, {{ p.mechanical_kills }}/{{ p.mechanical_losses }} K/L; trebuchets {{ p.trebuchets_total }} total, {{ p.trebuchets_sieged }} reached siege mode, {{ p.trebuchet_mobile_deaths }} move-mode deaths, {{ p.trebuchet_sieged_deaths }} siege-mode deaths
-- **Top units:** {{ top_items(p.top_units(8)) }}
-{% if p.top_structures() -%}
-- **Top structures:** {{ top_items(p.top_structures(8)) }}
-{% endif -%}
-{% if p.top_losses() -%}
-- **Most lost unit types:** {{ top_items(p.top_losses(8)) }}
-{% endif -%}
-{% if p.top_kill_units() -%}
-- **Unit types credited with kills:** {{ top_items(p.top_kill_units(8)) }}
-{% endif -%}
-{% if p.leave_time_seconds is not none -%}
-- **Leave time:** {{ left_time(p.leave_time_seconds) }}
-{% endif %}
-{% endfor %}
 {% endif %}
 
 {% if summary.resource_tracking_notes %}
@@ -1057,12 +1016,6 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 {% for note in summary.tech_inference_notes -%}
 - {{ note }}
 {% endfor %}
-{% endif %}
-
-{% if summary.raw_event_counts %}
-## Raw event counts
-
-{{ table(['Event type', 'Count'], tables.raw_event_rows, right=[1]) }}
 {% endif %}
 
 {% if summary.warnings %}
@@ -1083,6 +1036,64 @@ Trebuchets are shown as **total assets / reached siege mode / died in move mode*
 - Resource gathered/lost totals are score-value estimates; current stockpile is a direct tracker field. Gather rates per minute are derived from the gathered estimate (timeline: trailing 60 s; tables: average while gathering), because AoK leaves SC2's collection-rate field at 0. Starting stock and clear market trades are excluded (trades are listed separately).
 - Iron is shown as `n/a` when Terrazine fields are absent, rather than being silently treated as zero. Iron is SC2's Terrazine resource. Replays do not record its stockpile or income, so the Iron stockpile/rate columns read n/a. Iron spent is priced from the map version's own costs for trained units, started buildings (cancelled ones refunded) and completed research/age-ups; priced this way, gold and wood match the replay's recorded spending within about 3%.
 - Role and tech-lead labels are heuristic reads based on observed events, timings, resources, units, structures, and combat conversion.
+
+{{ mode_analysis }}
+
+## Appendix: raw detail
+
+Reference detail. If Discord's preview stops here, download the file for the rest.
+
+{% if summary.timeline_snapshots %}
+## Timeline snapshots
+
+These are cumulative 5-minute snapshots. They support the turning-point read but should be treated as replay-protocol evidence, not visual map observation.
+
+{% for group in timeline_table_groups -%}
+### {{ group.label }} — combat
+
+{{ table(['Time', 'PvP K/L', 'Units born', 'Animal K/D'], group.rows, right=[2]) }}
+
+### {{ group.label }} — technology + resources
+
+{{ table(['Time', 'Age', 'Tech', 'Mechanical K/L', 'Gold', 'Wood', 'Iron', 'Gold/min', 'Wood/min', 'Iron/min', 'Iron spent'], group.tech_resource_rows, right=[2, 4, 5, 6, 7, 8, 9, 10]) }}
+
+{% endfor -%}
+{% endif %}
+
+{% if summary.players %}
+## Player composition detail
+
+Per-player detail not shown in the tables above.
+
+{% for p in players_by_combat %}
+### {{ player_with_side(summary, p) }}
+
+- **Activity:** {{ p.control_groups }} control-group events, {{ p.pings }} pings, {{ p.chat_messages }} chat messages
+- **Age progression:** {{ age_timing_items(p) }}
+- **Tech structures by age:** {{ timed_items_with_age(p.tech_structure_first_seconds, tech_structure_labels, p.tech_structure_age_labels, 6) }}
+- **Key unlocks:** {{ timed_items_with_age(p.tech_unlock_first_seconds, unlock_labels, p.tech_upgrade_age_labels, 6) }}
+- **Gameplay upgrades by observed age:** {{ timed_items_with_age(p.tech_upgrade_first_seconds, empty_labels, p.tech_upgrade_age_labels, 10) }}
+- **Advanced units:** {{ timed_items_with_age(p.advanced_unit_first_seconds, advanced_unit_labels, p.advanced_unit_age_labels, 8) }}
+- **Inferred unit requirements:** {{ advanced_requirement_items(p) }}
+- **Top units:** {{ top_items(p.top_units(8)) }}
+{% if p.top_structures() -%}
+- **Top structures:** {{ top_items(p.top_structures(8)) }}
+{% endif -%}
+{% if p.top_losses() -%}
+- **Most lost unit types:** {{ top_items(p.top_losses(8)) }}
+{% endif -%}
+{% if p.top_kill_units() -%}
+- **Unit types credited with kills:** {{ top_items(p.top_kill_units(8)) }}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+
+{% if summary.raw_event_counts %}
+## Raw event counts
+
+{{ table(['Event type', 'Count'], tables.raw_event_rows, right=[1]) }}
+{% endif %}
 """
 
 
@@ -1260,6 +1271,8 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
             player_with_side=_player_with_side,
             player_table_groups=_build_player_table_groups(summary),
             defense_section="\n".join(_defense_markdown(summary)),
+            mode_analysis=_analysis_markdown(summary, mode),
+            preview_notice=PREVIEW_NOTICE,
             timeline_table_groups=_build_timeline_table_groups(summary),
             players_by_combat=sorted(summary.players, key=lambda p: (p.kills, p.animal_kills, p.tech_score, p.units_born), reverse=True),
             timed_items=_timed_items,
@@ -1272,7 +1285,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
             unlock_labels=UNLOCK_LABELS,
             advanced_unit_labels=ADVANCED_UNIT_LABELS,
         )
-        return rendered.strip() + "\n\n" + _analysis_markdown(summary, mode) + "\n"
+        return rendered.strip() + "\n"
 
     # Fallback keeps the bot usable if an existing venv has not installed Jinja2 yet.
     lines: list[str] = []
@@ -1291,7 +1304,7 @@ def markdown_report(summary: ReplaySummary, mode: str = "stats") -> str:
             ["Report format", "compact table layout; install Jinja2 for template rendering"],
         ],
     ))
-    lines.append("")
+    lines.extend(["", PREVIEW_NOTICE, ""])
 
     if summary.verdict:
         lines.extend(["## Short verdict", "", summary.verdict, ""])
