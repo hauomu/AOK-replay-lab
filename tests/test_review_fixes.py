@@ -79,6 +79,24 @@ class ReportSemanticsTests(unittest.TestCase):
         for claim in ("won through", "strongest evidence", "fight conversion", "remax", "role coverage"):
             self.assertNotIn(claim, markdown_report(summary))
 
+    def test_preview_notice_first_and_raw_detail_last(self):
+        # Discord previews only the start of a file; the notice and the analysis must come before raw detail.
+        summary = ReplaySummary(Path("v"), match_mode="Team", parser_ok=True, players=[
+            PlayerStats("A", team_id=1, result="Win", units_born=1, commands=1),
+            PlayerStats("B", team_id=2, result="Loss")])
+        _build_team_stats(summary)
+        _build_match_story(summary)
+        report = markdown_report(summary, "coaching")
+        notice = report.index("Discord's file preview")
+        self.assertLess(notice, report.index("\n## "))
+        appendix = report.index("## Appendix: raw detail")
+        self.assertLess(report.index("## Coaching analysis"), appendix)
+        self.assertLess(report.index("## Known limitations"), appendix)
+        self.assertLess(appendix, report.index("## Player composition detail"))
+        composition = report[report.index("## Player composition detail"):]
+        for repeated in ("**Role read:**", "**PvP combat:**", "**Resources:**", "**Leave time:**"):
+            self.assertNotIn(repeated, composition)
+
 
 class MultiReportTests(unittest.IsolatedAsyncioTestCase):
     async def test_every_report_is_attached_up_to_discord_limit(self):
